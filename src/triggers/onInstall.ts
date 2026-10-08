@@ -1,6 +1,7 @@
 type ScriptAppType = GoogleAppsScript.Script.ScriptApp;
 
 export const SYNC_TRIGGER_FUNCTION = 'syncReminders';
+export const HEARTBEAT_TRIGGER_FUNCTION = 'heartbeat';
 
 /**
  * 10 minutes: worst-case detection latency stays well inside every reminder offset
@@ -10,6 +11,18 @@ export const SYNC_TRIGGER_FUNCTION = 'syncReminders';
  */
 export const SYNC_INTERVAL_MINUTES = 10;
 
+/** Hour of day (script timezone, see appsscript.json) the daily heartbeat fires. */
+export const HEARTBEAT_HOUR_OF_DAY = 8;
+
+function reinstall(scriptApp: ScriptAppType, handlerFunction: string, create: () => void): void {
+  for (const trigger of scriptApp.getProjectTriggers()) {
+    if (trigger.getHandlerFunction() === handlerFunction) {
+      scriptApp.deleteTrigger(trigger);
+    }
+  }
+  create();
+}
+
 /**
  * Idempotent, same pattern as scripts/setup-sheet.ts: delete any existing trigger
  * for this function first, so re-running never produces duplicates (and therefore
@@ -18,10 +31,21 @@ export const SYNC_INTERVAL_MINUTES = 10;
  * duplicate in the first place is just as cheap).
  */
 export function installSyncTrigger(scriptApp: ScriptAppType): void {
-  for (const trigger of scriptApp.getProjectTriggers()) {
-    if (trigger.getHandlerFunction() === SYNC_TRIGGER_FUNCTION) {
-      scriptApp.deleteTrigger(trigger);
-    }
-  }
-  scriptApp.newTrigger(SYNC_TRIGGER_FUNCTION).timeBased().everyMinutes(SYNC_INTERVAL_MINUTES).create();
+  reinstall(scriptApp, SYNC_TRIGGER_FUNCTION, () => {
+    scriptApp.newTrigger(SYNC_TRIGGER_FUNCTION).timeBased().everyMinutes(SYNC_INTERVAL_MINUTES).create();
+  });
+}
+
+/** Same idempotency guarantee as installSyncTrigger, registered separately per the plan
+ * ("separate daily heartbeat trigger") rather than piggybacked on the 10-minute one. */
+export function installHeartbeatTrigger(scriptApp: ScriptAppType): void {
+  reinstall(scriptApp, HEARTBEAT_TRIGGER_FUNCTION, () => {
+    scriptApp.newTrigger(HEARTBEAT_TRIGGER_FUNCTION).timeBased().everyDays(1).atHour(HEARTBEAT_HOUR_OF_DAY).create();
+  });
+}
+
+/** Convenience for a fresh install — registers both triggers in one call. */
+export function installAllTriggers(scriptApp: ScriptAppType): void {
+  installSyncTrigger(scriptApp);
+  installHeartbeatTrigger(scriptApp);
 }

@@ -6,6 +6,8 @@ export class FakeTrigger {
   constructor(
     private readonly handlerFunction: string,
     public readonly everyMinutesValue: number,
+    public readonly everyDaysValue: number,
+    public readonly atHourValue: number | null,
   ) {}
 
   getHandlerFunction(): string {
@@ -19,15 +21,27 @@ class FakeClockTriggerBuilder {
     private readonly handlerFunction: string,
   ) {}
 
+  private minutes = 0;
+  private days = 0;
+  private hour: number | null = null;
+
   everyMinutes(n: number): FakeClockTriggerBuilder {
     this.minutes = n;
     return this;
   }
 
-  private minutes = 0;
+  everyDays(n: number): FakeClockTriggerBuilder {
+    this.days = n;
+    return this;
+  }
+
+  atHour(h: number): FakeClockTriggerBuilder {
+    this.hour = h;
+    return this;
+  }
 
   create(): FakeTrigger {
-    const trigger = new FakeTrigger(this.handlerFunction, this.minutes);
+    const trigger = new FakeTrigger(this.handlerFunction, this.minutes, this.days, this.hour);
     this.scriptApp.triggers.push(trigger);
     return trigger;
   }

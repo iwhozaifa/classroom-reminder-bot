@@ -12,6 +12,16 @@ import type { SheetConfigStore } from '../adapters/sheets/SheetConfigStore.js';
 
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 
+/** "on reaching 2, send a distinct error-alert DM every failing run until it recovers" — per the plan's M8 task. */
+const FAILURE_ALERT_THRESHOLD = 2;
+
+/** Deliberately narrower than Notifier — sendErrorAlert has no non-scheduling-channel
+ * equivalent (see SlackNotifier's own doc comment), so the watchdog depends on just
+ * this shape instead of pulling Slack-specific methods into the real Notifier port. */
+export interface ErrorAlerter {
+  sendErrorAlert(text: string): void;
+}
+
 export interface SyncCycleDeps {
   clock: Clock;
   config: UserConfig;
@@ -104,6 +114,7 @@ export interface SyncRemindersDeps {
   reminderStore: ReminderStore;
   deliveryStore: DeliveryStore;
   notifiers: Record<ChannelId, Notifier>;
+  alerter: ErrorAlerter;
   lockTimeoutMs?: number;
 }
 
@@ -120,7 +131,7 @@ export interface SyncRemindersDeps {
  * job, layered on top of this same catch block.
  */
 export function runSyncReminders(deps: SyncRemindersDeps): void {
-  const { lock, clock, logger, configStore, source, reminderStore, deliveryStore, notifiers } = deps;
+  const { lock, clock, logger, configStore, source, reminderStore, deliveryStore, notifiers, alerter } = deps;
 
   if (!lock.tryAcquire(deps.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS)) {
     logger.log('WARN', 'sync', 'Lock not acquired, skipping this cycle');
@@ -146,14 +157,43 @@ export function runSyncReminders(deps: SyncRemindersDeps): void {
           activeChannels: storedConfig.activeChannels,
         });
         logger.log('INFO', 'sync', 'Sync cycle completed', { userId: storedConfig.userId });
+        if (storedConfig.consecutiveFailureCount !== 0) {
+          configStore.update(storedConfig.userId, { consecutiveFailureCount: 0 });
+        }
       } catch (error) {
-        logger.log('ERROR', 'sync', 'Sync cycle failed for user', {
-          userId: storedConfig.userId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        handleSyncFailure(storedConfig, error, { configStore, logger, alerter });
       }
     }
   } finally {
     lock.release();
+  }
+}
+
+/**
+ * Increments and persists the per-user failure streak, then alerts once it reaches
+ * FAILURE_ALERT_THRESHOLD — and every run after that, until a success resets it to
+ * zero above. A failure here (e.g. Slack itself is down) is logged but never allowed
+ * to escape, so one user's broken alert can't stop the next user's cycle from running.
+ */
+function handleSyncFailure(
+  storedConfig: { userId: string; displayName: string; consecutiveFailureCount: number },
+  error: unknown,
+  deps: { configStore: SheetConfigStore; logger: SheetLogger; alerter: ErrorAlerter },
+): void {
+  const { configStore, logger, alerter } = deps;
+  const failureCount = storedConfig.consecutiveFailureCount + 1;
+  const message = error instanceof Error ? error.message : String(error);
+  configStore.update(storedConfig.userId, { consecutiveFailureCount: failureCount });
+  logger.log('ERROR', 'sync', 'Sync cycle failed for user', { userId: storedConfig.userId, failureCount, error: message });
+
+  if (failureCount >= FAILURE_ALERT_THRESHOLD) {
+    try {
+      alerter.sendErrorAlert(`Sync has now failed ${failureCount} times in a row for ${storedConfig.displayName}: ${message}`);
+    } catch (alertError) {
+      logger.log('ERROR', 'sync', 'Failed to send watchdog error alert', {
+        userId: storedConfig.userId,
+        error: alertError instanceof Error ? alertError.message : String(alertError),
+      });
+    }
   }
 }

@@ -15,7 +15,8 @@ import { ScriptServiceLock } from './infra/lock.js';
 import { SystemClock } from './infra/SystemClock.js';
 import { UrlFetchAppHttpClient } from './infra/UrlFetchAppHttpClient.js';
 import type { Notifier } from './ports/Notifier.js';
-import { installSyncTrigger } from './triggers/onInstall.js';
+import { installAllTriggers } from './triggers/onInstall.js';
+import { runHeartbeat } from './triggers/heartbeat.js';
 import { runSyncReminders } from './triggers/syncReminders.js';
 
 export const BOOTSTRAP_VERSION = '0.1.0';
@@ -114,6 +115,7 @@ function runSync(): void {
     reminderStore: reminderAndDeliveryStore,
     deliveryStore: reminderAndDeliveryStore,
     notifiers,
+    alerter: slackNotifier,
   });
 
   const resolvedDmChannelId = slackNotifier.getDmChannelId();
@@ -122,12 +124,35 @@ function runSync(): void {
   }
 }
 
-/** `clasp run runInstallSyncTrigger` — one-shot, idempotent, see triggers/onInstall.ts. */
-function runInstallSyncTrigger(): void {
-  installSyncTrigger(ScriptApp);
+/**
+ * `heartbeat` — the function the daily trigger (registered by `installAllTriggers`)
+ * calls. Independent of sync success/failure by design (see heartbeat.ts); also
+ * prunes old Log rows so the tab doesn't grow forever.
+ */
+function runDailyHeartbeat(): void {
+  const secrets = loadScriptSecrets();
+  const spreadsheet = SpreadsheetApp.openById(secrets.sheetId);
+  const clock = new SystemClock();
+  const logger = new SheetLogger(getSheet(spreadsheet, LOG_SHEET_NAME), clock);
+
+  const sender = new SlackNotifier({
+    httpClient: new UrlFetchAppHttpClient(),
+    botToken: secrets.slackBotToken,
+    slackUserId: secrets.slackUserId,
+    dmChannelId: secrets.slackDmChannelId,
+    retry: retryOptions(),
+  });
+
+  runHeartbeat({ clock, logger, sender });
+}
+
+/** `clasp run runInstallAllTriggers` — one-shot, idempotent, see triggers/onInstall.ts. */
+function runInstallAllTriggers(): void {
+  installAllTriggers(ScriptApp);
 }
 
 (globalThis as Record<string, unknown>).setupSheet = runSetupSheet;
 (globalThis as Record<string, unknown>).listMyCourses = runListMyCourses;
 (globalThis as Record<string, unknown>).syncReminders = runSync;
-(globalThis as Record<string, unknown>).installSyncTrigger = runInstallSyncTrigger;
+(globalThis as Record<string, unknown>).heartbeat = runDailyHeartbeat;
+(globalThis as Record<string, unknown>).installAllTriggers = runInstallAllTriggers;

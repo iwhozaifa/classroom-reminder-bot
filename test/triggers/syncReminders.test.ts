@@ -5,6 +5,7 @@ import { SheetLogger } from '../../src/adapters/sheets/SheetLogger.js';
 import { CONFIG_HEADERS } from '../../src/adapters/sheets/schema.js';
 import type { Assignment } from '../../src/core/types.js';
 import type { ClassroomSource } from '../../src/ports/ClassroomSource.js';
+import { FakeAlerter } from '../fakes/FakeAlerter.js';
 import { FakeLock } from '../fakes/FakeLock.js';
 import { FakeSchedulingNotifier } from '../fakes/FakeSchedulingNotifier.js';
 import { FakeSheet } from '../fakes/FakeSheet.js';
@@ -35,6 +36,14 @@ class EmptyClassroomSource implements ClassroomSource {
   }
 }
 
+/** Lets a single test flip between failing and succeeding across successive runSyncReminders() calls. */
+class SwitchableClassroomSource implements ClassroomSource {
+  current: ClassroomSource = new ThrowingClassroomSource();
+  listAssignments(userId: string, courseIds: string[]): Assignment[] {
+    return this.current.listAssignments(userId, courseIds);
+  }
+}
+
 function baseDeps(configRows: unknown[][], source: ClassroomSource) {
   const logSheet = new FakeSheet('Log');
   const clock = new FixedClock(Date.UTC(2026, 0, 1));
@@ -47,6 +56,7 @@ function baseDeps(configRows: unknown[][], source: ClassroomSource) {
     reminderStore: new InMemoryReminderStore(),
     deliveryStore: new InMemoryDeliveryStore(),
     notifiers: { slack: new FakeSchedulingNotifier() },
+    alerter: new FakeAlerter(),
     logSheet,
   };
 }
@@ -107,3 +117,69 @@ describe('runSyncReminders — per-user isolation', () => {
 function configRowFor(userId: string): unknown[] {
   return [userId, 'Another User', 'Asia/Karachi', '', 'slack', '', '', false, '', '', 7, 0, true];
 }
+
+describe('runSyncReminders — two-strikes watchdog', () => {
+  it('increments and persists the failure count on the first failure, without alerting yet', () => {
+    const deps = baseDeps([ROW_ACTIVE], new ThrowingClassroomSource());
+
+    runSyncReminders(deps);
+
+    expect(deps.alerter.errorAlerts).toHaveLength(0);
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ userId: 'u1', consecutiveFailureCount: 1 });
+  });
+
+  it('sends exactly one error alert once the failure count reaches the threshold (2)', () => {
+    const deps = baseDeps([ROW_ACTIVE], new ThrowingClassroomSource());
+
+    runSyncReminders(deps); // failure #1 — silent
+    runSyncReminders(deps); // failure #2 — alerts
+
+    expect(deps.alerter.errorAlerts).toHaveLength(1);
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ consecutiveFailureCount: 2 });
+  });
+
+  it('keeps alerting on every subsequent failing run past the threshold, not just the 2nd', () => {
+    const deps = baseDeps([ROW_ACTIVE], new ThrowingClassroomSource());
+
+    runSyncReminders(deps); // #1 silent
+    runSyncReminders(deps); // #2 alerts
+    runSyncReminders(deps); // #3 alerts again
+
+    expect(deps.alerter.errorAlerts).toHaveLength(2);
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ consecutiveFailureCount: 3 });
+  });
+
+  it('resets the failure count to 0 on the next successful cycle, stopping further alerts', () => {
+    const source = new SwitchableClassroomSource();
+    const deps = baseDeps([ROW_ACTIVE], source);
+
+    runSyncReminders(deps); // #1 silent
+    runSyncReminders(deps); // #2 alerts
+    source.current = new EmptyClassroomSource();
+    runSyncReminders(deps); // recovers
+
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ consecutiveFailureCount: 0 });
+
+    source.current = new ThrowingClassroomSource();
+    runSyncReminders(deps); // fresh failure #1 after recovery — silent again
+
+    expect(deps.alerter.errorAlerts).toHaveLength(1); // still just the one from before recovery
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ consecutiveFailureCount: 1 });
+  });
+
+  it('logs (but does not crash the run on) a failure to send the watchdog alert itself', () => {
+    const deps = baseDeps([ROW_ACTIVE], new ThrowingClassroomSource());
+    runSyncReminders(deps); // #1 — silent
+    deps.alerter.throwOnNextAlert();
+
+    expect(() => runSyncReminders(deps)).not.toThrow(); // #2 — alert attempted and fails
+
+    expect(deps.alerter.errorAlerts).toHaveLength(0);
+    const alertFailureRow = deps.logSheet.rows.find(
+      (row) => row[1] === 'ERROR' && String(row[3]).includes('Failed to send watchdog error alert'),
+    );
+    expect(alertFailureRow).toBeDefined();
+    // The failure count itself is still persisted even though sending the alert about it blew up.
+    expect(deps.configStore.loadAll()[0]).toMatchObject({ consecutiveFailureCount: 2 });
+  });
+});
