@@ -22,7 +22,7 @@ const appsScriptGlobals = [
 
 export default [
   {
-    ignores: ['node_modules/**', 'dist/**', 'build/**', '.clasp.json'],
+    ignores: ['node_modules/**', 'dist/**', 'build/**', 'coverage/**', '.clasp.json'],
   },
   {
     files: ['**/*.ts'],
