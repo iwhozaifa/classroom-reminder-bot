@@ -8,8 +8,12 @@ A $0 Google Classroom deadline reminder bot. Google Apps Script (under a school
 Workspace account) polls Classroom on a time-driven trigger, diffs pending
 assignments against a Google Sheet, and uses Slack's `chat.scheduleMessage` so
 reminders fire at the exact second even if Apps Script itself is down at that
-moment. Full design rationale lives in `docs/architecture.md` and `docs/decisions.md`
-once M9 writes them; the original milestone plan is the source of truth until then.
+moment. Full design rationale lives in `docs/architecture.md` (the hexagonal
+layers and the reconcile/planDeliveries walkthrough) and `docs/decisions.md`
+(the ADRs behind each non-obvious choice); `docs/troubleshooting.md` covers
+known failure modes. The original milestone plan (M0–M9, now complete) is
+still the record of what was built and why, if these docs ever need
+cross-checking against it.
 
 ## Module boundary rule (do not violate)
 
@@ -17,10 +21,12 @@ once M9 writes them; the original milestone plan is the source of truth until th
 `src/triggers/**`, and must never reference an Apps Script global
 (`SpreadsheetApp`, `Classroom`, `UrlFetchApp`, `PropertiesService`, `LockService`,
 `Logger`, `ScriptApp`, `Session`, `Utilities`, ...). This is enforced by
-`eslint.config.js` (`no-restricted-globals` scoped to `src/core/**`, and a
-`no-restricted-syntax` guard against importing `adapters` anywhere) — if a lint
-error fires here, fix the architecture, don't suppress the rule. `core` only
-knows about `src/ports/*` interfaces.
+`eslint.config.js`, both rules scoped to `src/core/**` only (`no-restricted-globals`
+for the Apps Script globals, `no-restricted-syntax` for importing `adapters`) —
+`src/triggers/**` and `src/adapters/**` themselves legitimately import adapters
+to wire them together, so the rule would be wrong if applied there too. If a
+lint error fires inside `src/core`, fix the architecture, don't suppress the
+rule. `core` only knows about `src/ports/*` interfaces.
 
 ## Commands
 
@@ -35,7 +41,8 @@ knows about `src/ports/*` interfaces.
 
 ## Secrets
 
-Script Properties only (Slack bot token, Slack user id, cached DM channel id).
+Script Properties only (Slack bot token, Slack user id, cached DM channel id,
+the Sheet id — `src/infra/config.ts` is the one module that reads them).
 Never in code, never in git. `.env.example` documents the property *names* only —
 nothing actually reads a `.env` file at runtime, Apps Script has no such concept.
 `.clasp.json` and `.env` are gitignored; `.claspignore` restricts what `clasp push`
@@ -48,7 +55,10 @@ modules — no god files. A milestone's code and its tests land together.
 
 ## Working through the plan
 
-The approved milestone plan (M0–M9) governs scope and acceptance criteria for
-each stage. Don't build ahead of the current milestone (e.g. don't wire real
-triggers before `src/core` has full test coverage) — the hexagonal split exists
-specifically so each layer can be finished and verified independently.
+The approved milestone plan (M0–M9) governed scope and acceptance criteria for
+each stage, and is now complete. The hexagonal split (don't wire real triggers
+before `src/core` has full test coverage, etc.) existed specifically so each
+layer could be finished and verified independently — any new feature work
+should keep following that same discipline (core stays pure and fully unit
+tested; a new adapter gets its own fixture-based contract tests; triggers stay
+thin wiring) even though there's no more numbered milestone list driving it.
