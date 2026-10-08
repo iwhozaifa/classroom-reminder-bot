@@ -6,7 +6,7 @@ import { FakeSchedulingNotifier } from '../fakes/FakeSchedulingNotifier.js';
 import { FixedClock } from '../fakes/FixedClock.js';
 import { InMemoryDeliveryStore } from '../fakes/InMemoryDeliveryStore.js';
 import { InMemoryReminderStore } from '../fakes/InMemoryReminderStore.js';
-import { runSyncCycle } from './runSyncCycle.js';
+import { runSyncCycle } from '../../src/triggers/syncReminders.js';
 
 const NOW = Date.UTC(2026, 0, 1, 0, 0);
 

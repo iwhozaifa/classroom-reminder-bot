@@ -39,16 +39,12 @@ export default [
       ...tseslint.configs.recommended.rules,
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'error',
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "ImportDeclaration[source.value=/^(\\.\\.\\/)*adapters/]",
-          message: 'src/core must not import from src/adapters — depend on src/ports instead.',
-        },
-      ],
     },
   },
   {
+    // Both module-boundary rules are scoped to src/core only — triggers/ and
+    // adapters/ themselves necessarily import adapters to wire them together
+    // (that's the orchestrator's whole job from M7 onward).
     files: ['src/core/**/*.ts'],
     rules: {
       'no-restricted-globals': [
@@ -57,6 +53,13 @@ export default [
           name,
           message: `${name} is an Apps Script global — src/core must stay pure. Use a port instead.`,
         })),
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ImportDeclaration[source.value=/^(\\.\\.\\/)*adapters/]",
+          message: 'src/core must not import from src/adapters — depend on src/ports instead.',
+        },
       ],
     },
   },
