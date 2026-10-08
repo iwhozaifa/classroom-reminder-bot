@@ -99,6 +99,18 @@ describe('SlackNotifier — schedule', () => {
     expect(client.requests).toHaveLength(2);
   });
 
+  it('retries on a plain HTTP 500 the same way it retries restricted_too_many, proving the default status-code retry still applies through SlackNotifier', () => {
+    const client = new FakeHttpClient();
+    client.enqueue({ statusCode: 500, headers: {}, body: '' });
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/slack/scheduleMessageSuccess.json')));
+    const notifier = makeNotifier(client);
+
+    const id = notifier.schedule(delivery, 'text', delivery.fireAt);
+
+    expect(id).toBe('Q1298393284');
+    expect(client.requests).toHaveLength(2);
+  });
+
   it('throws a SlackApiError on a non-JSON body instead of crashing on JSON.parse', () => {
     const client = new FakeHttpClient();
     client.enqueue({ statusCode: 200, headers: {}, body: '<html>not json</html>' });
