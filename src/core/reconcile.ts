@@ -1,8 +1,21 @@
-import { resolveDueInstant } from './time.js';
+import { resolveDueInstant, MS_PER_HOUR } from './time.js';
 import { isPending } from './rules/pendingState.js';
 import { desiredDueDateReminders } from './rules/dueDateRules.js';
 import { desiredNoDueDateReminders } from './rules/noDueDateRules.js';
 import type { Assignment, Instant, Reminder, ReminderChange, UserConfig } from './types.js';
+
+/**
+ * How long an already-created reminder is kept "desired" after its own `fireAt` has
+ * passed, purely so the Delivery layer's catch-up (rule 7) gets a real chance to run
+ * before the reminder itself finally expires. Without this, `desiredDueDateReminders`/
+ * `desiredNoDueDateReminders` filtering out any offset with `fireAt <= now` on every
+ * fresh recompute would make a stale Delivery invisible to planDeliveries() the very
+ * next cycle — the catch-up path (and the *entire* dispatch path for a non-scheduling
+ * channel, which relies on the same mechanism) would never actually be reachable.
+ * 24h is generous slack across many missed 10-minute sync cycles, bounded so a
+ * permanently-stuck reminder can't accumulate forever.
+ */
+const RETENTION_GRACE_MS = 24 * MS_PER_HOUR;
 
 export interface ReconcileInput {
   now: Instant;
@@ -45,8 +58,19 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
         ? desiredDueDateReminders(dueAt, now)
         : desiredNoDueDateReminders(assignment.postedAt, now, config.rollingWindowDays);
 
+    const freshKeys = new Set<string>();
     for (const offset of offsets) {
-      desiredReminders.push({ ...base, reminderType: offset.reminderType, fireAt: offset.fireAt });
+      const reminder: Reminder = { ...base, reminderType: offset.reminderType, fireAt: offset.fireAt };
+      freshKeys.add(reminderKey(reminder));
+      desiredReminders.push(reminder);
+    }
+
+    for (const stored of storedReminders) {
+      if (stored.assignmentId !== assignment.assignmentId) continue;
+      if (freshKeys.has(reminderKey(stored))) continue; // already reproduced fresh above
+      if (stored.dueAt !== dueAt) continue; // due date changed since creation (rule 6) — replace, don't retain
+      if (now - stored.fireAt > RETENTION_GRACE_MS) continue; // long past due for catch-up to have resolved it
+      desiredReminders.push(stored);
     }
   }
 
