@@ -1,0 +1,7 @@
+{
+  "courses": [
+    { "id": "course-1", "name": "Intro to Biology" },
+    { "id": "course-2", "name": "Algebra II" }
+  ],
+  "nextPageToken": "page2"
+}

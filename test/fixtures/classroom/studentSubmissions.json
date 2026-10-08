@@ -1,0 +1,6 @@
+{
+  "studentSubmissions": [
+    { "courseWorkId": "cw-1", "state": "CREATED" },
+    { "courseWorkId": "cw-3", "state": "STATE_IS_FROM_THE_FUTURE" }
+  ]
+}

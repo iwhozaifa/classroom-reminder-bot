@@ -1,0 +1,19 @@
+{
+  "courseWork": [
+    {
+      "id": "cw-1",
+      "title": "Essay draft",
+      "state": "PUBLISHED",
+      "creationTime": "2026-01-05T09:00:00.000Z",
+      "dueDate": { "year": 2026, "month": 1, "day": 12 },
+      "dueTime": { "hours": 23, "minutes": 59 }
+    },
+    {
+      "id": "cw-2",
+      "title": "Unpublished draft assignment",
+      "state": "DRAFT",
+      "creationTime": "2026-01-06T09:00:00.000Z"
+    }
+  ],
+  "nextPageToken": "page2"
+}
