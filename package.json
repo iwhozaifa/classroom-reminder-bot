@@ -1,0 +1,33 @@
+{
+  "name": "classroom-reminder-bot",
+  "version": "0.1.0",
+  "description": "Zero-cost Google Classroom deadline reminder bot, delivered via Slack DM, running entirely on Google Apps Script.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "esbuild src/main.ts --bundle --platform=neutral --format=iife --target=es2020 --outfile=dist/Code.js",
+    "deploy": "bash scripts/deploy.sh"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2",
+    "@vitest/coverage-v8": "^2.0.5",
+    "@types/google-apps-script": "^1.0.83",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.23.1",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

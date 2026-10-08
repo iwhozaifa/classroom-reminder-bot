@@ -1,0 +1,6 @@
+# rootDir is ./dist (see .clasp.json) — only compiled output should ever be pushed.
+**/**
+!dist/**
+!appsscript.json
+.git/**
+node_modules/**

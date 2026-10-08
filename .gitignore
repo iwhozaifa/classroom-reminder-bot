@@ -1,0 +1,18 @@
+# Dependencies & build output
+node_modules/
+dist/
+build/
+coverage/
+
+# Secrets — never committed, ever
+.clasp.json
+.env
+*.env.local
+
+# Editor/OS noise
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# Apps Script local pull artifacts that duplicate src/
+/appsscript.json.bak
