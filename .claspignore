@@ -1,6 +1,6 @@
 # rootDir is ./dist (see .clasp.json) — only compiled output should ever be pushed.
+# Patterns here are matched relative to rootDir, not the repo root, so the
+# bundle is "Code.js", not "dist/Code.js".
 **/**
-!dist/**
+!Code.js
 !appsscript.json
-.git/**
-node_modules/**
