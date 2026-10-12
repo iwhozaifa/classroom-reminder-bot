@@ -103,3 +103,18 @@ of `dist/Code.js`. If the dropdown is empty:
 - `npx clasp status` must list `dist/Code.js` under "Not ignored files" — if it
   doesn't, `.claspignore` is excluding it (patterns there are relative to
   `rootDir`, i.e. `dist/`).
+
+## "Specified permissions are not sufficient to call …"
+
+`appsscript.json` declares `oauthScopes` explicitly, so Apps Script only
+grants exactly those scopes. It does not auto-detect any others from the
+code. The error names the missing one (e.g. `ScriptApp.getProjectTriggers`
+needs `https://www.googleapis.com/auth/script.scriptapp`). To fix:
+
+1. Add the scope from the error's "Required permissions" line to
+   `oauthScopes` in `appsscript.json`, and a matching row to
+   `test/manifest.test.ts` so it can't regress.
+2. `npm run deploy`.
+3. Run any function from the editor again — Google shows a fresh consent
+   prompt for the new scope; accept it.
+

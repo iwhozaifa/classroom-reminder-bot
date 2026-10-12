@@ -53,6 +53,15 @@ nothing actually reads a `.env` file at runtime, Apps Script has no such concept
 `.clasp.json` and `.env` are gitignored; `.claspignore` restricts what `clasp push`
 uploads to exactly `dist/` + `appsscript.json`.
 
+## OAuth scopes
+
+`appsscript.json` lists `oauthScopes` explicitly, which turns off Apps Script's
+automatic scope detection — calling any Apps Script API whose scope isn't in
+that list fails at runtime ("Specified permissions are not sufficient…").
+New Apps Script API usage needs its scope added there *and* a row in
+`test/manifest.test.ts`, which fails if the bundle calls an API whose scope
+isn't declared.
+
 ## Commit style
 
 Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`). Small, typed
