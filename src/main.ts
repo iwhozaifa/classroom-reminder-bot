@@ -1,7 +1,8 @@
-// Entry point bundled by esbuild into dist/Code.js. Apps Script invokes trigger
-// functions by global name, and the IIFE bundle gives each module its own closure
-// — so every global Apps Script calls gets attached here via
-// `(globalThis as Record<string, unknown>).name = fn;`, never declared loose.
+// Entry point bundled by esbuild into dist/Code.js. Apps Script invokes functions
+// by global name, and the editor's Run dropdown only lists top-level `function`
+// declarations — neither can see inside the IIFE bundle. So every function Apps
+// Script calls is listed in `entryPoints` below, and scripts/build.mjs appends a
+// real top-level `function <name>()` stub per key that delegates into the bundle.
 import { setupSheet } from '../scripts/setup-sheet.js';
 import { ClassroomApiSource } from './adapters/classroom/ClassroomApiSource.js';
 import { SheetConfigStore } from './adapters/sheets/SheetConfigStore.js';
@@ -15,7 +16,7 @@ import { ScriptServiceLock } from './infra/lock.js';
 import { SystemClock } from './infra/SystemClock.js';
 import { UrlFetchAppHttpClient } from './infra/UrlFetchAppHttpClient.js';
 import type { Notifier } from './ports/Notifier.js';
-import { installAllTriggers } from './triggers/onInstall.js';
+import { HEARTBEAT_TRIGGER_FUNCTION, installAllTriggers, SYNC_TRIGGER_FUNCTION } from './triggers/onInstall.js';
 import { runHeartbeat } from './triggers/heartbeat.js';
 import { runSyncReminders } from './triggers/syncReminders.js';
 
@@ -146,13 +147,21 @@ function runDailyHeartbeat(): void {
   runHeartbeat({ clock, logger, sender });
 }
 
-/** `clasp run runInstallAllTriggers` — one-shot, idempotent, see triggers/onInstall.ts. */
+/** `clasp run installAllTriggers` — one-shot, idempotent, see triggers/onInstall.ts. */
 function runInstallAllTriggers(): void {
   installAllTriggers(ScriptApp);
 }
 
-(globalThis as Record<string, unknown>).setupSheet = runSetupSheet;
-(globalThis as Record<string, unknown>).listMyCourses = runListMyCourses;
-(globalThis as Record<string, unknown>).syncReminders = runSync;
-(globalThis as Record<string, unknown>).heartbeat = runDailyHeartbeat;
-(globalThis as Record<string, unknown>).installAllTriggers = runInstallAllTriggers;
+/**
+ * Every function Apps Script can call by name (Run dropdown, triggers, `clasp run`).
+ * scripts/build.mjs turns each key into a real top-level `function` in dist/Code.js.
+ * Trigger handlers are keyed on the same constants onInstall.ts registers, so a
+ * rename there can't drift away from the function that actually exists.
+ */
+export const entryPoints = {
+  setupSheet: runSetupSheet,
+  listMyCourses: runListMyCourses,
+  [SYNC_TRIGGER_FUNCTION]: runSync,
+  [HEARTBEAT_TRIGGER_FUNCTION]: runDailyHeartbeat,
+  installAllTriggers: runInstallAllTriggers,
+} as const;

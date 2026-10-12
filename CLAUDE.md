@@ -33,8 +33,13 @@ rule. `core` only knows about `src/ports/*` interfaces.
 - `npm run lint` / `npm run lint:fix`
 - `npm run typecheck` — `tsc --noEmit`, strict mode
 - `npm test` / `npm run test:watch` / `npm run test:coverage`
-- `npm run build` — bundles `src/main.ts` into `dist/Code.js` via esbuild (IIFE,
-  no `import`/`export` in the output — Apps Script has no module loader)
+- `npm run build` — runs `scripts/build.mjs`: bundles `src/main.ts` into
+  `dist/Code.js` via esbuild (IIFE, no `import`/`export` in the output — Apps
+  Script has no module loader), then appends a top-level `function <name>()`
+  stub for every key of `entryPoints` in `src/main.ts`. Those stubs are what the
+  editor's Run dropdown, triggers and `clasp run` see — a new callable function
+  must be added to `entryPoints`, never attached to `globalThis` by hand
+  (`test/build.test.ts` enforces this).
 - `npm run deploy` — runs `scripts/deploy.sh`: build, copy `appsscript.json` into
   `dist/`, `clasp push`. Requires a local `.clasp.json` (never committed — copy
   `.clasp.json.example` and fill in your own `scriptId`).

@@ -88,3 +88,18 @@ Check the **Triggers** page (clock icon) in the Apps Script editor. If
 (or was run before `setupSheet`/Script Properties were in place, and errored
 before creating the triggers). Run `installAllTriggers` from the function
 dropdown and check **Executions** for any error.
+
+## The Run dropdown in the Apps Script editor says "No functions"
+
+The editor only lists **top-level** `function` declarations. `npm run build`
+generates one for every key of `entryPoints` in `src/main.ts`, at the bottom
+of `dist/Code.js`. If the dropdown is empty:
+
+- The project still has a bundle pushed by an older build (from before these
+  stubs were generated). Run `npm run deploy` again and reload the editor tab.
+- `grep '^function ' dist/Code.js` should list `setupSheet`, `listMyCourses`,
+  `syncReminders`, `heartbeat` and `installAllTriggers`. If a function you
+  added is missing, it wasn't added to `entryPoints`.
+- `npx clasp status` must list `dist/Code.js` under "Not ignored files" — if it
+  doesn't, `.claspignore` is excluding it (patterns there are relative to
+  `rootDir`, i.e. `dist/`).

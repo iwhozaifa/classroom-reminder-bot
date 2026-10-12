@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "build": "esbuild src/main.ts --bundle --platform=neutral --format=iife --target=es2020 --outfile=dist/Code.js",
+    "build": "node scripts/build.mjs",
     "deploy": "bash scripts/deploy.sh"
   },
   "devDependencies": {
