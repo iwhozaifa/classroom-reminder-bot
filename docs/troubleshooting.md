@@ -118,3 +118,32 @@ needs `https://www.googleapis.com/auth/script.scriptapp`). To fix:
 3. Run any function from the editor again — Google shows a fresh consent
    prompt for the new scope; accept it.
 
+## Push notifications (`feat/push-sync` branch)
+
+- **Log tab shows `Rejected push with missing or wrong token`.** The push
+  subscription's endpoint URL doesn't end in
+  `?token=<PUSH_VERIFICATION_TOKEN>` exactly, or the property was changed
+  without updating the subscription. If you never set up a subscription, it's
+  someone probing the public `/exec` URL. That's harmless, but rotate the
+  token if it ever leaked.
+- **No `push` rows at all after editing an assignment.** Check in order:
+  the Registrations tab has a non-expired row for that course (else run
+  `renewPushRegistrations` and read its Log rows); the topic grants Pub/Sub
+  Publisher to `classroom-notifications@system.gserviceaccount.com`; the
+  subscription's endpoint is the *current* web app deployment's `/exec` URL;
+  the deployment's access is *Anyone*. If a Workspace admin blocks *Anyone*,
+  push can't work on that domain, and the 6-hour sweep is all you get.
+- **`renewPushRegistrations` fails with `PERMISSION_DENIED`.** The
+  `classroom.push-notifications` scope wasn't authorized (run it once by hand
+  from the editor), the Classroom API isn't enabled in the linked GCP
+  project, or the domain doesn't allow this account to register for that
+  course's feed.
+- **Pub/Sub subscription shows a growing unacked backlog / redeliveries.**
+  The endpoint is answering with something other than a 2xx, most likely a
+  302 because `doPost` returned a value. It must return nothing. Redeliveries
+  are still harmless (they're skipped as already covered), and the 10-minute
+  retention bounds them.
+- **Pushed change didn't take effect, but the Log shows `skipped (lock
+  busy)`.** Another sync held the lock past its 30s wait. Apps Script can't
+  ask Pub/Sub to redeliver, so the next 6-hourly sweep picks it up. Run
+  `syncReminders` by hand if you don't want to wait.

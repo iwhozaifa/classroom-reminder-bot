@@ -44,6 +44,9 @@ needs anything Jest has that Vitest doesn't.
 
 ## 4. 10-minute sync interval
 
+> **Superseded on the `feat/push-sync` branch by ADR 13** (push-primary, with
+> a 6-hour sweep). Still current on `main`.
+
 **Decision:** The `syncReminders` trigger runs every 10 minutes
 (`src/triggers/onInstall.ts`'s `SYNC_INTERVAL_MINUTES`).
 
@@ -176,3 +179,55 @@ steps 2–3), they are the ones running M0's real go/no-go check. If a Workspace
 admin blocks something, the fix is almost always an admin-side allowance, not
 a code change — but if it turns out to need one, that's the one open question
 this build couldn't close in advance.
+
+## 13. Push-primary sync via Classroom registrations + Pub/Sub (experimental)
+
+**Status:** Experimental, `feat/push-sync` branch only. Not merged to `main`.
+
+**Context:** The 10-minute poll (ADR 4) makes 144 runs a day, each re-reading
+every followed course from Classroom even when nothing changed. That is $0
+and well inside quota, so this is an efficiency and latency experiment, not
+a fix for a real failure.
+
+**Decision:** Classroom changes arrive as push notifications. A
+`COURSE_WORK_CHANGES` registration per followed course publishes to a Cloud
+Pub/Sub topic, and a push subscription POSTs to the Apps Script web app's
+`doPost`, which runs the normal sync for the users following that course.
+Registrations are renewed daily. The time-driven sync stays as a 6-hour
+safety-net sweep, because `reconcile()` depends on `now` (rolling window,
+catch-up, retention) and no event fires when only time passes.
+
+**Why this shape:**
+- Classroom's only push mechanism is Pub/Sub. There's no direct HTTP webhook.
+- A Pub/Sub *pull* subscription read from a time trigger would just be
+  polling again, only cheaper per tick. Push to `doPost` is the only option
+  that needs no time trigger at all for the common case.
+- Deduplication is by publish time against the last sync start
+  (`core/pushCoverage.ts`), not a cooldown, so bursts and redeliveries
+  collapse without dropping a later change.
+
+**Costs and risks (why it isn't on `main`):**
+- **Breaks the "no card" stance.** Needs a standard GCP project, and Pub/Sub
+  may require a billing account even though usage stays in the free tier.
+- **Anonymous web app.** Pub/Sub can't sign in, so the web app must allow
+  *Anyone*. A school Workspace admin may forbid that outright. The only auth
+  is a shared secret in the endpoint URL's query string (which shows up in
+  Pub/Sub's config and possibly in logs). Pub/Sub's OIDC-signed push isn't
+  usable because Apps Script never exposes the `Authorization` header to
+  `doPost`.
+- **Student eligibility unverified.** Whether a student account (not a
+  teacher) may create `COURSE_WORK_CHANGES` registrations in a given school
+  domain has not been checked live.
+- **No way to nack.** Apps Script can't return a non-2xx, so a push that hits
+  a busy lock or a crash is lost. The sweep recovers it, within 6 hours
+  instead of 10 minutes.
+- **More moving parts.** A web app deployment that must be re-versioned after
+  each `clasp push`, a daily renewal job, and a new tab and scope.
+
+**Required before any merge:** a live spike (the same idea as ADR 12) on
+the real school account. Create the topic and subscription, deploy the web app
+as Anyone, register one course as the student, then edit an assignment and
+turn one in. Confirm (a) registration is permitted, (b) the POST arrives, and
+(c) Pub/Sub sees it acknowledged (no retry storm from a 302). If any of these
+fails, record the exact error here. That is a valid outcome for this
+experiment.
