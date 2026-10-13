@@ -1,4 +1,4 @@
-// Idempotent tab + header creation for all four tabs. Lives here (not under
+// Idempotent tab + header creation for every tab. Lives here (not under
 // src/adapters) because it's a one-shot operator action rather than part of the
 // sync cycle, but it still has to ship inside dist/Code.js to be runnable via
 // `clasp run setupSheet` — src/main.ts imports and registers it as a global.
@@ -9,6 +9,8 @@ import {
   DELIVERIES_SHEET_NAME,
   LOG_HEADERS,
   LOG_SHEET_NAME,
+  REGISTRATIONS_HEADERS,
+  REGISTRATIONS_SHEET_NAME,
   REMINDERS_HEADERS,
   REMINDERS_SHEET_NAME,
 } from '../src/adapters/sheets/schema.js';
@@ -25,6 +27,7 @@ const TABS: TabSpec[] = [
   { name: DELIVERIES_SHEET_NAME, headers: DELIVERIES_HEADERS },
   { name: CONFIG_SHEET_NAME, headers: CONFIG_HEADERS },
   { name: LOG_SHEET_NAME, headers: LOG_HEADERS },
+  { name: REGISTRATIONS_SHEET_NAME, headers: REGISTRATIONS_HEADERS },
 ];
 
 /**

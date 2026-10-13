@@ -4,6 +4,7 @@ import {
   CONFIG_HEADERS,
   DELIVERIES_HEADERS,
   LOG_HEADERS,
+  REGISTRATIONS_HEADERS,
   REMINDERS_HEADERS,
 } from '../../../src/adapters/sheets/schema.js';
 import { FakeSpreadsheet } from '../../fakes/FakeSheet.js';
@@ -15,7 +16,7 @@ function run(spreadsheet: FakeSpreadsheet): void {
 }
 
 describe('setupSheet', () => {
-  it('creates all four tabs with the correct headers on a fresh spreadsheet', () => {
+  it('creates every tab with the correct headers on a fresh spreadsheet', () => {
     const spreadsheet = new FakeSpreadsheet();
     run(spreadsheet);
 
@@ -23,6 +24,9 @@ describe('setupSheet', () => {
     expect(spreadsheet.getSheetByName('Deliveries')?.rows[0]).toEqual([...DELIVERIES_HEADERS]);
     expect(spreadsheet.getSheetByName('Config')?.rows[0]).toEqual([...CONFIG_HEADERS]);
     expect(spreadsheet.getSheetByName('Log')?.rows[0]).toEqual([...LOG_HEADERS]);
+    expect(spreadsheet.getSheetByName('Registrations')?.rows[0]).toEqual([
+      ...REGISTRATIONS_HEADERS,
+    ]);
   });
 
   it('is idempotent: running it twice creates no duplicate tabs and no duplicate header rows', () => {

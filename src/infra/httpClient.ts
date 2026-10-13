@@ -4,7 +4,7 @@
 
 export interface HttpRequest {
   url: string;
-  method: 'get' | 'post';
+  method: 'get' | 'post' | 'delete';
   headers?: Record<string, string>;
   contentType?: string;
   payload?: string;
