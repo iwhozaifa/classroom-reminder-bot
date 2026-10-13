@@ -19,7 +19,7 @@ export interface HeartbeatDeps {
 }
 
 /**
- * Run once a day by a separate trigger from the 10-minute sync — its only job is to
+ * Run once a day by a separate trigger from the sync sweep — its only job is to
  * prove the script itself is still alive even on a day with nothing to remind about,
  * and to keep the Log tab from growing forever. Deliberately independent of sync
  * success/failure: silence from *this* trigger (not from Slack in general) is what

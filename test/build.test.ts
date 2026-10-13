@@ -5,16 +5,22 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { entryPoints } from '../src/main.js';
-import { HEARTBEAT_TRIGGER_FUNCTION, SYNC_TRIGGER_FUNCTION } from '../src/triggers/onInstall.js';
+import {
+  HEARTBEAT_TRIGGER_FUNCTION,
+  RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+  SYNC_TRIGGER_FUNCTION,
+} from '../src/triggers/onInstall.js';
 import { FakeScriptApp } from './fakes/FakeScriptApp.js';
 
-/** Every function SETUP.md / README tell the user to run, plus every trigger handler. */
+/** Every function SETUP.md / README tell the user to run, every trigger handler, and the web app's doPost. */
 const EXPECTED_ENTRY_POINTS = [
   'setupSheet',
   'listMyCourses',
   'installAllTriggers',
+  'doPost',
   SYNC_TRIGGER_FUNCTION,
   HEARTBEAT_TRIGGER_FUNCTION,
+  RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
 ];
 
 describe('scripts/build.mjs output (dist/Code.js)', () => {
@@ -54,7 +60,29 @@ describe('scripts/build.mjs output (dist/Code.js)', () => {
     vm.runInContext('installAllTriggers()', context);
 
     expect(scriptApp.triggers.map((t) => t.getHandlerFunction()).sort()).toEqual(
-      [HEARTBEAT_TRIGGER_FUNCTION, SYNC_TRIGGER_FUNCTION].sort(),
+      [
+        HEARTBEAT_TRIGGER_FUNCTION,
+        SYNC_TRIGGER_FUNCTION,
+        RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+      ].sort(),
     );
+  });
+
+  // Pub/Sub only counts a 2xx as delivered; any ContentService response is a 302.
+  it('doPost forwards its event, never throws, and returns nothing (so Apps Script answers 200)', () => {
+    const errors: string[] = [];
+    // No PropertiesService in the sandbox, so the handler fails — it must log, not throw.
+    const context = vm.createContext({
+      console: { error: (message: string) => errors.push(message) },
+    });
+    vm.runInContext(code, context);
+
+    const result: unknown = vm.runInContext(
+      'doPost({ parameter: {}, postData: { contents: "{}" } })',
+      context,
+    );
+
+    expect(result).toBeUndefined();
+    expect(errors).toHaveLength(1);
   });
 });

@@ -4,21 +4,24 @@ import {
   HEARTBEAT_TRIGGER_FUNCTION,
   installAllTriggers,
   installHeartbeatTrigger,
+  installRenewRegistrationsTrigger,
   installSyncTrigger,
-  SYNC_INTERVAL_MINUTES,
+  RENEW_REGISTRATIONS_HOUR_OF_DAY,
+  RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+  SYNC_SWEEP_HOURS,
   SYNC_TRIGGER_FUNCTION,
 } from '../../src/triggers/onInstall.js';
 import { FakeScriptApp } from '../fakes/FakeScriptApp.js';
 
 describe('installSyncTrigger', () => {
-  it('creates exactly one trigger for syncReminders, on the configured interval', () => {
+  it('creates exactly one trigger for syncReminders, on the safety-net sweep interval', () => {
     const scriptApp = new FakeScriptApp();
 
     installSyncTrigger(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
 
     expect(scriptApp.triggers).toHaveLength(1);
     expect(scriptApp.triggers[0]!.getHandlerFunction()).toBe(SYNC_TRIGGER_FUNCTION);
-    expect(scriptApp.triggers[0]!.everyMinutesValue).toBe(SYNC_INTERVAL_MINUTES);
+    expect(scriptApp.triggers[0]!.everyHoursValue).toBe(SYNC_SWEEP_HOURS);
   });
 
   it('is idempotent — running it twice still leaves exactly one trigger', () => {
@@ -78,14 +81,13 @@ describe('installHeartbeatTrigger', () => {
 });
 
 describe('installAllTriggers', () => {
-  it('registers both the sync and heartbeat triggers in one call', () => {
+  it('registers the sync, heartbeat and registration-renewal triggers in one call', () => {
     const scriptApp = new FakeScriptApp();
 
     installAllTriggers(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
 
     const handlers = scriptApp.triggers.map((t) => t.getHandlerFunction());
-    expect(handlers).toEqual(expect.arrayContaining([SYNC_TRIGGER_FUNCTION, HEARTBEAT_TRIGGER_FUNCTION]));
-    expect(scriptApp.triggers).toHaveLength(2);
+    expect(handlers.sort()).toEqual([SYNC_TRIGGER_FUNCTION, HEARTBEAT_TRIGGER_FUNCTION, RENEW_REGISTRATIONS_TRIGGER_FUNCTION].sort());
   });
 
   it('stays idempotent when called repeatedly', () => {
@@ -94,6 +96,20 @@ describe('installAllTriggers', () => {
     installAllTriggers(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
     installAllTriggers(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
 
-    expect(scriptApp.triggers).toHaveLength(2);
+    expect(scriptApp.triggers).toHaveLength(3);
+  });
+});
+
+describe('installRenewRegistrationsTrigger', () => {
+  it('creates exactly one daily renewal trigger at the configured hour, idempotently', () => {
+    const scriptApp = new FakeScriptApp();
+
+    installRenewRegistrationsTrigger(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
+    installRenewRegistrationsTrigger(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
+
+    expect(scriptApp.triggers).toHaveLength(1);
+    expect(scriptApp.triggers[0]!.getHandlerFunction()).toBe(RENEW_REGISTRATIONS_TRIGGER_FUNCTION);
+    expect(scriptApp.triggers[0]!.everyDaysValue).toBe(1);
+    expect(scriptApp.triggers[0]!.atHourValue).toBe(RENEW_REGISTRATIONS_HOUR_OF_DAY);
   });
 });

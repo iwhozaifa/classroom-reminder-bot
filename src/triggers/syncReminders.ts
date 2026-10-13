@@ -116,12 +116,16 @@ export interface SyncRemindersDeps {
   notifiers: Record<ChannelId, Notifier>;
   alerter: ErrorAlerter;
   lockTimeoutMs?: number;
+  /** Push path only: sync just the users who follow this course (all of *their* courses, see below). */
+  onlyCourseId?: string;
+  /** Called with a user's course ids just before that user's Classroom read — feeds core/pushCoverage.ts. */
+  recordSyncStart?: (courseIds: string[], startedAt: number) => void;
 }
 
 /**
- * The real orchestrator, run every 10 minutes by the trigger `onInstall.ts`
- * registers. Acquires the script lock first (skip-and-log on contention, per the
- * plan — never block, since the next cycle is 10 minutes away regardless);
+ * The real orchestrator, run by the periodic safety-net sweep `onInstall.ts`
+ * registers and by the push handler (pushSync.ts). Acquires the script lock first
+ * (skip-and-log on contention — returns false so the caller knows nothing ran);
  * everything else happens only while held, released in `finally` so a crash never
  * leaves the lock stuck until Apps Script's own timeout.
  *
@@ -130,18 +134,26 @@ export interface SyncRemindersDeps {
  * ClassroomApiSource. Turning a failure into the two-strikes watchdog alert is M8's
  * job, layered on top of this same catch block.
  */
-export function runSyncReminders(deps: SyncRemindersDeps): void {
-  const { lock, clock, logger, configStore, source, reminderStore, deliveryStore, notifiers, alerter } = deps;
+export function runSyncReminders(deps: SyncRemindersDeps): boolean {
+  const { lock, clock, logger, configStore, source, reminderStore, deliveryStore, notifiers, alerter, onlyCourseId } = deps;
 
   if (!lock.tryAcquire(deps.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS)) {
     logger.log('WARN', 'sync', 'Lock not acquired, skipping this cycle');
-    return;
+    return false;
   }
 
   try {
-    const configs = configStore.loadAll().filter((c) => c.active);
+    // Filter users, never courses: runSyncCycle must always see *every* course a user
+    // follows, because reconcile() treats a missing assignment as gone and would
+    // remove that user's reminders for every course left out.
+    const configs = configStore
+      .loadAll()
+      .filter(
+        (c) => c.active && (onlyCourseId === undefined || c.courseIds.includes(onlyCourseId)),
+      );
     for (const storedConfig of configs) {
       try {
+        deps.recordSyncStart?.(storedConfig.courseIds, clock.now());
         runSyncCycle({
           clock,
           config: {
@@ -167,6 +179,7 @@ export function runSyncReminders(deps: SyncRemindersDeps): void {
   } finally {
     lock.release();
   }
+  return true;
 }
 
 /**

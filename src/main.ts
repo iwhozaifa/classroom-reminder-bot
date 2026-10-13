@@ -5,20 +5,41 @@
 // real top-level `function <name>()` stub per key that delegates into the bundle.
 import { setupSheet } from '../scripts/setup-sheet.js';
 import { ClassroomApiSource } from './adapters/classroom/ClassroomApiSource.js';
+import { ClassroomRegistrar } from './adapters/classroom/ClassroomRegistrar.js';
 import { SheetConfigStore } from './adapters/sheets/SheetConfigStore.js';
 import { SheetLogger } from './adapters/sheets/SheetLogger.js';
+import { SheetRegistrationStore } from './adapters/sheets/SheetRegistrationStore.js';
 import { SheetReminderStore } from './adapters/sheets/SheetReminderStore.js';
-import { CONFIG_SHEET_NAME, DELIVERIES_SHEET_NAME, LOG_SHEET_NAME, REMINDERS_SHEET_NAME } from './adapters/sheets/schema.js';
+import {
+  CONFIG_SHEET_NAME,
+  DELIVERIES_SHEET_NAME,
+  LOG_SHEET_NAME,
+  REGISTRATIONS_SHEET_NAME,
+  REMINDERS_SHEET_NAME,
+} from './adapters/sheets/schema.js';
 import { SlackNotifier } from './adapters/slack/SlackNotifier.js';
 import type { ChannelId } from './core/types.js';
-import { loadScriptSecrets, saveSlackDmChannelId } from './infra/config.js';
+import {
+  loadPushSettings,
+  loadScriptSecrets,
+  saveSlackDmChannelId,
+  scriptPropertiesKeyValueStore,
+} from './infra/config.js';
 import { ScriptServiceLock } from './infra/lock.js';
 import { SystemClock } from './infra/SystemClock.js';
 import { UrlFetchAppHttpClient } from './infra/UrlFetchAppHttpClient.js';
 import type { Notifier } from './ports/Notifier.js';
-import { HEARTBEAT_TRIGGER_FUNCTION, installAllTriggers, SYNC_TRIGGER_FUNCTION } from './triggers/onInstall.js';
+import {
+  HEARTBEAT_TRIGGER_FUNCTION,
+  installAllTriggers,
+  RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+  SYNC_TRIGGER_FUNCTION,
+} from './triggers/onInstall.js';
 import { runHeartbeat } from './triggers/heartbeat.js';
+import { handlePushNotification, syncStartRecorder } from './triggers/pushSync.js';
+import { runRenewRegistrations } from './triggers/renewRegistrations.js';
 import { runSyncReminders } from './triggers/syncReminders.js';
+import type { SyncRemindersDeps } from './triggers/syncReminders.js';
 
 export const BOOTSTRAP_VERSION = '0.1.0';
 
@@ -73,13 +94,12 @@ function runListMyCourses(): void {
 }
 
 /**
- * `syncReminders` — the function the 10-minute trigger (registered by
- * `installSyncTrigger`) actually calls. Builds every real adapter, runs one cycle
- * via `runSyncReminders`, then persists a freshly-resolved Slack DM channel id back
- * to Script Properties so it isn't re-resolved every cycle (SlackNotifier only
- * knows how to report it back, not where to put it — that's this wiring's job).
+ * Builds every real adapter a sync needs — shared by the sweep and the push path.
+ * `finish()` persists a freshly-resolved Slack DM channel id back to Script
+ * Properties so it isn't re-resolved every run (SlackNotifier only knows how to
+ * report it back, not where to put it — that's this wiring's job).
  */
-function runSync(): void {
+function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void } {
   const secrets = loadScriptSecrets();
   const spreadsheet = SpreadsheetApp.openById(secrets.sheetId);
   const clock = new SystemClock();
@@ -107,7 +127,7 @@ function runSync(): void {
     retry: retryOptions(),
   });
 
-  runSyncReminders({
+  const deps: SyncRemindersDeps = {
     lock: new ScriptServiceLock(),
     clock,
     logger,
@@ -117,12 +137,84 @@ function runSync(): void {
     deliveryStore: reminderAndDeliveryStore,
     notifiers,
     alerter: slackNotifier,
-  });
+  };
 
-  const resolvedDmChannelId = slackNotifier.getDmChannelId();
-  if (resolvedDmChannelId && resolvedDmChannelId !== secrets.slackDmChannelId) {
-    saveSlackDmChannelId(resolvedDmChannelId);
+  const finish = (): void => {
+    const resolvedDmChannelId = slackNotifier.getDmChannelId();
+    if (resolvedDmChannelId && resolvedDmChannelId !== secrets.slackDmChannelId) {
+      saveSlackDmChannelId(resolvedDmChannelId);
+    }
+  };
+  return { deps, finish };
+}
+
+/**
+ * `syncReminders` — the safety-net sweep trigger (registered by `installAllTriggers`).
+ * Also records per-course sync-start marks so pushes it already covered are skipped.
+ */
+function runSync(): void {
+  const { deps, finish } = buildSyncDeps();
+  runSyncReminders({
+    ...deps,
+    recordSyncStart: syncStartRecorder(scriptPropertiesKeyValueStore()),
+  });
+  finish();
+}
+
+/**
+ * `doPost` — the web app endpoint the Pub/Sub push subscription calls (see
+ * triggers/pushSync.ts). Deliberately returns nothing: Apps Script then answers 200
+ * directly, whereas any ContentService/HtmlService response is served via a 302
+ * redirect, which Pub/Sub counts as a failed delivery and retries. For the same
+ * reason nothing may escape — a thrown error is logged, never re-thrown.
+ */
+function runDoPost(e: GoogleAppsScript.Events.DoPost): void {
+  try {
+    const push = loadPushSettings();
+    const { deps, finish } = buildSyncDeps();
+    handlePushNotification(
+      { body: e.postData?.contents ?? '', token: e.parameter?.token ?? null },
+      {
+        ...deps,
+        expectedToken: push.verificationToken,
+        decodeBase64: (data) => Utilities.newBlob(Utilities.base64Decode(data)).getDataAsString(),
+        marks: scriptPropertiesKeyValueStore(),
+      },
+    );
+    finish();
+  } catch (error) {
+    console.error(
+      `doPost failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+    );
   }
+}
+
+/** `renewPushRegistrations` — the daily trigger keeping one live Classroom registration per followed course. */
+function runRenewPushRegistrations(): void {
+  const secrets = loadScriptSecrets();
+  const push = loadPushSettings();
+  const spreadsheet = SpreadsheetApp.openById(secrets.sheetId);
+  const clock = new SystemClock();
+
+  runRenewRegistrations({
+    clock,
+    logger: new SheetLogger(getSheet(spreadsheet, LOG_SHEET_NAME), clock),
+    configStore: new SheetConfigStore(getSheet(spreadsheet, CONFIG_SHEET_NAME)),
+    registrar: new ClassroomRegistrar({
+      httpClient: new UrlFetchAppHttpClient(),
+      oauthToken: ScriptApp.getOAuthToken(),
+      retry: retryOptions(),
+    }),
+    registrationStore: new SheetRegistrationStore(getSheet(spreadsheet, REGISTRATIONS_SHEET_NAME)),
+    alerter: new SlackNotifier({
+      httpClient: new UrlFetchAppHttpClient(),
+      botToken: secrets.slackBotToken,
+      slackUserId: secrets.slackUserId,
+      dmChannelId: secrets.slackDmChannelId,
+      retry: retryOptions(),
+    }),
+    topicName: push.topicName,
+  });
 }
 
 /**
@@ -163,5 +255,7 @@ export const entryPoints = {
   listMyCourses: runListMyCourses,
   [SYNC_TRIGGER_FUNCTION]: runSync,
   [HEARTBEAT_TRIGGER_FUNCTION]: runDailyHeartbeat,
+  [RENEW_REGISTRATIONS_TRIGGER_FUNCTION]: runRenewPushRegistrations,
+  doPost: runDoPost,
   installAllTriggers: runInstallAllTriggers,
 } as const;
