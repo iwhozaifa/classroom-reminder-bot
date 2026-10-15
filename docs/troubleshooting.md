@@ -68,6 +68,25 @@ that course id from `Config.course_ids`.
 - `restricted_too_many` **is** retried automatically (Slack describes this as
   a 5-minute rolling window) — seeing it briefly in the Log is not a problem
   by itself; seeing it block an actual delivery would be.
+- `invalid_scheduled_message_id` from `chat.deleteScheduledMessage` — see the
+  next section.
+
+## "Sync has now failed N times in a row … `invalid_scheduled_message_id`"
+
+**Cause (fixed by ADR 14):** a reminder was already posted by Slack, which
+throws away its scheduled-message id. Then its assignment was turned in, its
+due date moved, or the daily window rolled past it. Older builds tried to
+cancel it anyway. The failed cancel aborted the whole cycle before anything
+was saved, so the same cancel failed again on every run. Every failed run had
+also scheduled its new reminders with Slack *without recording them*, so the
+next run scheduled them again. That is why the same reminder arrived two or
+more times.
+
+**Fix:** deploy a build with ADR 14, then run `purgeOrphanScheduledMessages`
+once from the editor's Run dropdown. It deletes every reminder still queued in
+your DM that no `scheduled` Deliveries row owns, and prints how many it
+removed in the Executions log. The next sync re-schedules anything it still
+needs. The failure count in Config resets to 0 on the first successful sync.
 
 ## Two alert DMs never arrived after I broke something on purpose
 

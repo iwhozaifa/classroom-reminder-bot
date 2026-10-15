@@ -231,3 +231,31 @@ turn one in. Confirm (a) registration is permitted, (b) the POST arrives, and
 (c) Pub/Sub sees it acknowledged (no retry storm from a 302). If any of these
 fails, record the exact error here. That is a valid outcome for this
 experiment.
+
+## 14. An already-fired scheduled message is "sent"; cancels are idempotent; deliveries always persist
+
+**Context:** in production the sync failed every 10 minutes with
+`chat.deleteScheduledMessage failed: invalid_scheduled_message_id`, and
+reminders arrived in duplicate. Slack drops a scheduled message's id once it
+posts. `planDeliveries` still asked to cancel any no-longer-wanted `scheduled`
+row, even one whose `fireAt` had passed. `runSyncCycle` let that throw escape
+before `deliveryStore.applyChanges`, so the cycle saved nothing. That meant
+the bad cancel repeated forever, and every run re-scheduled (and never
+recorded) its new reminders.
+
+**Decision**, one fix per layer, each enough to break the loop on its own:
+- **Core:** a `scheduled` delivery whose `fireAt <= now` is treated as
+  delivered. `planDeliveries` emits `markSent` for it and no `scheduleCancel`.
+  "Scheduled with a channel that schedules natively, and the time has passed"
+  is the definition of sent.
+- **Adapter:** `SlackNotifier.cancel` treats `invalid_scheduled_message_id`
+  as success. The wanted outcome is "not queued any more", and that also covers
+  Slack's short no-delete window just before `post_at`.
+- **Orchestrator:** `runSyncCycle` persists in a `finally`, so any message
+  Slack accepted is always recorded. A cancel that genuinely fails is left
+  `scheduled` for the next cycle to retry, and its error is rethrown after
+  persisting, so the watchdog still reports real failures.
+
+A one-off `purgeOrphanScheduledMessages` entry point cleans up the duplicates
+the old loop left queued in Slack. It holds the script lock so it can't race a
+sync that is between scheduling and recording.
