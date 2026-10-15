@@ -46,7 +46,11 @@ export function planDeliveries(input: PlanDeliveriesInput): PlanDeliveriesResult
   const storedByKey = new Map(storedDeliveries.map((d) => [deliveryKey(d), d]));
 
   for (const [key, desired] of desiredDeliveries) {
-    if (storedByKey.has(key)) continue; // same key = same fireAt = no-op
+    const stored = storedByKey.get(key);
+    // Same key = same fireAt = no-op — unless it was cancelled and is wanted again
+    // with its time still ahead (turned in, then unsubmitted). A past cancelled one
+    // stays cancelled: catch-up cancels superseded past reminders on purpose.
+    if (stored !== undefined && !(stored.status === 'cancelled' && stored.fireAt > now)) continue;
 
     const caps = capabilitiesFor(channelCapabilities, desired.channel);
     if (caps.supportsScheduling) {

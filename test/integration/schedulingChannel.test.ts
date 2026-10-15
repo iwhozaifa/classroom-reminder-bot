@@ -112,6 +112,22 @@ describe('sync cycle — scheduling channel (Slack-shaped), end to end against f
     expect(deliveryStore.loadDeliveries('u1').every((d) => d.status === 'cancelled')).toBe(true);
   });
 
+  it('turned in then unsubmitted -> the still-future reminders are scheduled again', () => {
+    source.setAssignments('c1', [assignment()]);
+    cycle();
+    source.setAssignments('c1', [assignment({ submissionState: 'TURNED_IN' })]);
+    cycle();
+    expect(notifier.scheduled.size).toBe(0);
+
+    source.setAssignments('c1', [assignment({ submissionState: 'RECLAIMED_BY_STUDENT' })]);
+    cycle();
+
+    expect(notifier.scheduled.size).toBe(4);
+    const deliveries = deliveryStore.loadDeliveries('u1');
+    expect(deliveries).toHaveLength(4);
+    expect(deliveries.every((d) => d.status === 'scheduled')).toBe(true);
+  });
+
   it('assignment deleted entirely -> every scheduled delivery is cancelled, same as turning it in', () => {
     source.setAssignments('c1', [assignment()]);
     cycle();
