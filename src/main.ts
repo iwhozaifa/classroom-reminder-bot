@@ -30,9 +30,12 @@ import { SystemClock } from './infra/SystemClock.js';
 import { UrlFetchAppHttpClient } from './infra/UrlFetchAppHttpClient.js';
 import type { Notifier } from './ports/Notifier.js';
 import {
+  CATCH_UP_SYNC_FUNCTION,
+  clearCatchUpSync,
   HEARTBEAT_TRIGGER_FUNCTION,
   installAllTriggers,
   RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+  scheduleCatchUpSync,
   SYNC_TRIGGER_FUNCTION,
 } from './triggers/onInstall.js';
 import { runHeartbeat } from './triggers/heartbeat.js';
@@ -153,13 +156,24 @@ function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void; slackNo
  * `syncReminders` — the safety-net sweep trigger (registered by `installAllTriggers`).
  * Also records per-course sync-start marks so pushes it already covered are skipped.
  */
-function runSync(): void {
+function runSync(): boolean {
   const { deps, finish } = buildSyncDeps();
-  runSyncReminders({
+  const ran = runSyncReminders({
     ...deps,
     recordSyncStart: syncStartRecorder(scriptPropertiesKeyValueStore()),
   });
   finish();
+  return ran;
+}
+
+/**
+ * `catchUpSync` — the one-shot trigger a lock-busy push schedules (see
+ * onInstall.ts's scheduleCatchUpSync). Clears its own fired trigger first, then
+ * runs a full sync; if the lock is *still* busy, it schedules another one-shot.
+ */
+function runCatchUpSync(): void {
+  clearCatchUpSync(ScriptApp);
+  if (!runSync()) scheduleCatchUpSync(ScriptApp);
 }
 
 /**
@@ -173,7 +187,7 @@ function runDoPost(e: GoogleAppsScript.Events.DoPost): void {
   try {
     const push = loadPushSettings();
     const { deps, finish } = buildSyncDeps();
-    handlePushNotification(
+    const outcome = handlePushNotification(
       { body: e.postData?.contents ?? '', token: e.parameter?.token ?? null },
       {
         ...deps,
@@ -182,6 +196,7 @@ function runDoPost(e: GoogleAppsScript.Events.DoPost): void {
         marks: scriptPropertiesKeyValueStore(),
       },
     );
+    if (outcome === 'skipped') scheduleCatchUpSync(ScriptApp);
     finish();
   } catch (error) {
     console.error(
@@ -272,7 +287,10 @@ function runInstallAllTriggers(): void {
 export const entryPoints = {
   setupSheet: runSetupSheet,
   listMyCourses: runListMyCourses,
-  [SYNC_TRIGGER_FUNCTION]: runSync,
+  [SYNC_TRIGGER_FUNCTION]: (): void => {
+    runSync();
+  },
+  [CATCH_UP_SYNC_FUNCTION]: runCatchUpSync,
   [HEARTBEAT_TRIGGER_FUNCTION]: runDailyHeartbeat,
   [RENEW_REGISTRATIONS_TRIGGER_FUNCTION]: runRenewPushRegistrations,
   doPost: runDoPost,

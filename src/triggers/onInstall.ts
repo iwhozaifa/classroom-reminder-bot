@@ -3,6 +3,10 @@ type ScriptAppType = GoogleAppsScript.Script.ScriptApp;
 export const SYNC_TRIGGER_FUNCTION = 'syncReminders';
 export const HEARTBEAT_TRIGGER_FUNCTION = 'heartbeat';
 export const RENEW_REGISTRATIONS_TRIGGER_FUNCTION = 'renewPushRegistrations';
+export const CATCH_UP_SYNC_FUNCTION = 'catchUpSync';
+
+/** How long after a lock-busy push the one-shot catch-up sync runs. */
+export const CATCH_UP_DELAY_MS = 60_000;
 
 /**
  * Safety-net sweep, not the primary change detector — Classroom push (pushSync.ts)
@@ -67,4 +71,33 @@ export function installAllTriggers(scriptApp: ScriptAppType): void {
   installSyncTrigger(scriptApp);
   installHeartbeatTrigger(scriptApp);
   installRenewRegistrationsTrigger(scriptApp);
+}
+
+/**
+ * A push that hit a busy lock can't be nacked back to Pub/Sub (Apps Script always
+ * answers 200), so without this it would wait for the 6-hour sweep. Schedules one
+ * one-shot full sync shortly after instead — and only one: if a catch-up is already
+ * pending it covers this push too, which also keeps a burst of pushes from piling
+ * up toward Apps Script's 20-triggers-per-script limit.
+ */
+export function scheduleCatchUpSync(scriptApp: ScriptAppType): boolean {
+  const pending = scriptApp
+    .getProjectTriggers()
+    .some((trigger) => trigger.getHandlerFunction() === CATCH_UP_SYNC_FUNCTION);
+  if (pending) return false;
+  scriptApp.newTrigger(CATCH_UP_SYNC_FUNCTION).timeBased().after(CATCH_UP_DELAY_MS).create();
+  return true;
+}
+
+/**
+ * A fired one-shot trigger stays listed (and counts toward the limit) until deleted,
+ * so the catch-up handler removes its own before doing anything else — which also
+ * lets it schedule a fresh one if the lock is *still* busy.
+ */
+export function clearCatchUpSync(scriptApp: ScriptAppType): void {
+  for (const trigger of scriptApp.getProjectTriggers()) {
+    if (trigger.getHandlerFunction() === CATCH_UP_SYNC_FUNCTION) {
+      scriptApp.deleteTrigger(trigger);
+    }
+  }
 }

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { entryPoints } from '../src/main.js';
 import {
+  CATCH_UP_SYNC_FUNCTION,
   HEARTBEAT_TRIGGER_FUNCTION,
   RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
   SYNC_TRIGGER_FUNCTION,
@@ -22,6 +23,7 @@ const EXPECTED_ENTRY_POINTS = [
   SYNC_TRIGGER_FUNCTION,
   HEARTBEAT_TRIGGER_FUNCTION,
   RENEW_REGISTRATIONS_TRIGGER_FUNCTION,
+  CATCH_UP_SYNC_FUNCTION,
 ];
 
 describe('scripts/build.mjs output (dist/Code.js)', () => {

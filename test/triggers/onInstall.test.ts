@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CATCH_UP_DELAY_MS,
+  CATCH_UP_SYNC_FUNCTION,
+  clearCatchUpSync,
+  scheduleCatchUpSync,
   HEARTBEAT_HOUR_OF_DAY,
   HEARTBEAT_TRIGGER_FUNCTION,
   installAllTriggers,
@@ -111,5 +115,43 @@ describe('installRenewRegistrationsTrigger', () => {
     expect(scriptApp.triggers[0]!.getHandlerFunction()).toBe(RENEW_REGISTRATIONS_TRIGGER_FUNCTION);
     expect(scriptApp.triggers[0]!.everyDaysValue).toBe(1);
     expect(scriptApp.triggers[0]!.atHourValue).toBe(RENEW_REGISTRATIONS_HOUR_OF_DAY);
+  });
+});
+
+describe('scheduleCatchUpSync / clearCatchUpSync', () => {
+  const asScriptApp = (fake: FakeScriptApp) => fake as unknown as GoogleAppsScript.Script.ScriptApp;
+
+  it('creates one one-shot catch-up trigger, CATCH_UP_DELAY_MS out', () => {
+    const scriptApp = new FakeScriptApp();
+
+    expect(scheduleCatchUpSync(asScriptApp(scriptApp))).toBe(true);
+
+    expect(scriptApp.triggers).toHaveLength(1);
+    expect(scriptApp.triggers[0]!.getHandlerFunction()).toBe(CATCH_UP_SYNC_FUNCTION);
+    expect(scriptApp.triggers[0]!.afterMsValue).toBe(CATCH_UP_DELAY_MS);
+  });
+
+  it('never stacks a second one while one is pending (a burst of lock-busy pushes)', () => {
+    const scriptApp = new FakeScriptApp();
+    installAllTriggers(asScriptApp(scriptApp));
+
+    scheduleCatchUpSync(asScriptApp(scriptApp));
+    expect(scheduleCatchUpSync(asScriptApp(scriptApp))).toBe(false);
+    scheduleCatchUpSync(asScriptApp(scriptApp));
+
+    expect(scriptApp.triggers.filter((t) => t.getHandlerFunction() === CATCH_UP_SYNC_FUNCTION)).toHaveLength(1);
+  });
+
+  it('clearCatchUpSync removes only the catch-up trigger, leaving the regular ones', () => {
+    const scriptApp = new FakeScriptApp();
+    installAllTriggers(asScriptApp(scriptApp));
+    scheduleCatchUpSync(asScriptApp(scriptApp));
+
+    clearCatchUpSync(asScriptApp(scriptApp));
+
+    expect(scriptApp.triggers.map((t) => t.getHandlerFunction()).sort()).toEqual(
+      [HEARTBEAT_TRIGGER_FUNCTION, RENEW_REGISTRATIONS_TRIGGER_FUNCTION, SYNC_TRIGGER_FUNCTION].sort(),
+    );
+    expect(scheduleCatchUpSync(asScriptApp(scriptApp))).toBe(true);
   });
 });
