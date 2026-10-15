@@ -9,12 +9,15 @@ export class FakeSchedulingNotifier implements Notifier {
   readonly scheduled = new Map<string, Delivery>();
   readonly cancelled: string[] = [];
   readonly sentNow: Delivery[] = [];
+  /** Message text by external id, for both scheduled and immediate sends. */
+  readonly texts = new Map<string, string>();
 
   private nextId = 1;
 
-  schedule(delivery: Delivery, _text: string, _fireAt: Instant): string {
+  schedule(delivery: Delivery, text: string, _fireAt: Instant): string {
     const id = `slack-msg-${this.nextId++}`;
     this.scheduled.set(id, delivery);
+    this.texts.set(id, text);
     return id;
   }
 
@@ -25,8 +28,10 @@ export class FakeSchedulingNotifier implements Notifier {
     this.cancelled.push(externalMessageId);
   }
 
-  sendNow(delivery: Delivery, _text: string): string | null {
+  sendNow(delivery: Delivery, text: string): string | null {
     this.sentNow.push(delivery);
-    return `slack-msg-${this.nextId++}`;
+    const id = `slack-msg-${this.nextId++}`;
+    this.texts.set(id, text);
+    return id;
   }
 }

@@ -12,6 +12,7 @@ export interface RawCourseWork {
   creationTime: string; // RFC3339 UTC, e.g. '2026-01-05T09:00:00.000Z'
   dueDate?: DueDateParts;
   dueTime?: { hours?: number; minutes?: number };
+  alternateLink?: string;
 }
 
 /** Mirrors the subset of Classroom's StudentSubmission resource this bot needs. */
@@ -54,5 +55,6 @@ export function mapCourseWorkToAssignment(
     postedAt: Date.parse(courseWork.creationTime),
     dueDate: courseWork.dueDate ?? null,
     dueTime: mapDueTime(courseWork.dueTime),
+    ...(courseWork.alternateLink !== undefined && { link: courseWork.alternateLink }),
   };
 }

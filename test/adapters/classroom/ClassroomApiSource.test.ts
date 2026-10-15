@@ -23,6 +23,7 @@ describe('ClassroomApiSource — listAssignments', () => {
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/studentSubmissions.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/course.json')));
     const { source } = makeSource(client);
 
     const assignments = source.listAssignments('me', ['course-1']);
@@ -33,11 +34,44 @@ describe('ClassroomApiSource — listAssignments', () => {
     expect(client.requests.every((r) => r.headers?.Authorization === 'Bearer test-oauth-token')).toBe(true);
   });
 
+  it('attaches the course name (courses.get) and the assignment alternateLink for the reminder text', () => {
+    const client = new FakeHttpClient();
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/studentSubmissions.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/course.json')));
+    const { source } = makeSource(client);
+
+    const [assignment] = source.listAssignments('me', ['course-1']);
+
+    expect(assignment).toMatchObject({
+      courseName: 'BSCS-5A Software Engineering (Fall 2026)',
+      link: 'https://classroom.google.com/c/course-1/a/cw-1/details',
+    });
+    expect(client.requests[3]!.url).toMatch(/\/courses\/course-1\?fields=id,name$/);
+  });
+
+  it('still returns the course assignments, without a course name, when courses.get fails', () => {
+    const client = new FakeHttpClient();
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/studentSubmissions.json')));
+    client.enqueue(jsonResponse(404, loadFixture('../fixtures/classroom/errorNotFound.json')));
+    const { source, logSheet } = makeSource(client);
+
+    const assignments = source.listAssignments('me', ['course-1']);
+
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]!.courseName).toBeUndefined();
+    expect(logSheet.rows.some((row) => row[1] === 'WARN' && String(row[3]).includes('course name'))).toBe(true);
+  });
+
   it('follows nextPageToken across multiple courseWork pages', () => {
     const client = new FakeHttpClient();
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
     client.enqueue(jsonResponse(200, { studentSubmissions: [] }));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/course.json')));
     const { source } = makeSource(client);
 
     source.listAssignments('me', ['course-1']);
@@ -52,6 +86,7 @@ describe('ClassroomApiSource — listAssignments', () => {
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/studentSubmissions.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/course.json')));
     const { source, logSheet } = makeSource(client);
 
     const assignments = source.listAssignments('me', ['course-1']);
@@ -71,6 +106,7 @@ describe('ClassroomApiSource — listAssignments', () => {
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage1.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/courseWorkPage2.json')));
     client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/studentSubmissions.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/classroom/course.json')));
     const { source, logSheet } = makeSource(client);
 
     const assignments = source.listAssignments('me', ['course-bad', 'course-1']);

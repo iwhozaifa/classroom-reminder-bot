@@ -72,6 +72,7 @@ export class ClassroomApiSource implements ClassroomSource {
       return [];
     }
 
+    const courseName = this.getCourseName(courseId);
     const submissionByCourseWorkId = new Map(submissions.map((submission) => [submission.courseWorkId, submission]));
     const assignments: Assignment[] = [];
     for (const work of courseWork) {
@@ -88,9 +89,26 @@ export class ClassroomApiSource implements ClassroomSource {
         continue;
       }
 
-      assignments.push(mapCourseWorkToAssignment(courseId, work, submissionState));
+      const assignment = mapCourseWorkToAssignment(courseId, work, submissionState);
+      assignments.push(courseName === null ? assignment : { ...assignment, courseName });
     }
     return assignments;
+  }
+
+  /**
+   * `courses.get`, display-only (the reminder's subject line) — a failure here is
+   * logged and degrades to a subject-less reminder, never to a skipped course.
+   */
+  private getCourseName(courseId: string): string | null {
+    try {
+      return this.get<{ name?: string }>(`${API_BASE}/courses/${courseId}?fields=id,name`).name ?? null;
+    } catch (error) {
+      this.deps.logger.log('WARN', 'classroom', 'Failed to fetch course name, reminders will omit the subject', {
+        courseId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   private listCourseWork(courseId: string): RawCourseWork[] {

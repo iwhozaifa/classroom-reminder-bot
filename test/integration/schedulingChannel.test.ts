@@ -165,4 +165,62 @@ describe('sync cycle — scheduling channel (Slack-shaped), end to end against f
 
     expect(notifier.sentNow).toHaveLength(0);
   });
+
+  it('turned in after a reminder already fired -> that row is marked sent, never cancelled (the Slack handle is gone)', () => {
+    source.setAssignments('c1', [assignment()]);
+    cycle();
+    const firstFire = Math.min(...deliveryStore.loadDeliveries('u1').map((d) => d.fireAt));
+    // Slack has posted the earliest one by now, which discards its scheduled id.
+    const firedId = [...notifier.scheduled].find(([, d]) => d.fireAt === firstFire)![0];
+    notifier.scheduled.delete(firedId);
+    clock.advanceTo(firstFire + 60_000);
+
+    source.setAssignments('c1', [assignment({ submissionState: 'TURNED_IN' })]);
+    expect(() => cycle()).not.toThrow();
+
+    expect(notifier.cancelled).toHaveLength(3);
+    const deliveries = deliveryStore.loadDeliveries('u1');
+    expect(deliveries.find((d) => d.externalMessageId === firedId)!.status).toBe('sent');
+    expect(deliveries.filter((d) => d.status === 'cancelled')).toHaveLength(3);
+  });
+
+  it('a cancel that throws still persists every schedule made earlier in the same cycle, then rethrows', () => {
+    source.setAssignments('c1', [assignment({ assignmentId: 'old' })]);
+    cycle();
+    notifier.cancel = () => {
+      throw new Error('channel_not_found');
+    };
+
+    // 'old' disappears (4 cancels, all failing) while 'new' appears (4 creates, run first).
+    source.setAssignments('c1', [assignment({ assignmentId: 'new' })]);
+    expect(() => cycle()).toThrow('channel_not_found');
+
+    const deliveries = deliveryStore.loadDeliveries('u1');
+    expect(deliveries.filter((d) => d.assignmentId === 'new' && d.status === 'scheduled')).toHaveLength(4);
+    // The failed cancels stay 'scheduled' so the next cycle retries them.
+    expect(deliveries.filter((d) => d.assignmentId === 'old' && d.status === 'scheduled')).toHaveLength(4);
+
+    // No re-schedule of 'new' on the retry: it was recorded despite the throw.
+    const scheduledBefore = notifier.scheduled.size;
+    expect(() => cycle()).toThrow('channel_not_found');
+    expect(notifier.scheduled.size).toBe(scheduledBefore);
+  });
+
+  it('reminder text carries the cleaned subject, title, due time, time left and the Classroom link', () => {
+    source.setAssignments('c1', [
+      assignment({
+        title: 'Lab 4: Binary Trees',
+        courseName: 'BSCS-5A Software Engineering (Fall 2026)',
+        link: 'https://classroom.google.com/c/c1/a/a1/details',
+      }),
+    ]);
+    cycle();
+
+    const id24h = [...notifier.scheduled].find(([, d]) => d.reminderType === '24h')![0];
+    // Due 2026-01-10 12:00 UTC = 5:00 PM in Asia/Karachi.
+    expect(notifier.texts.get(id24h)).toBe(
+      ':books: *Software Engineering* — Lab 4: Binary Trees\n' +
+        'Due Sat 10 Jan, 5:00 PM (in 24h) · <https://classroom.google.com/c/c1/a/a1/details|Open in Classroom>',
+    );
+  });
 });
