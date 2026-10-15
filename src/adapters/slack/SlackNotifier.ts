@@ -2,12 +2,18 @@ import type { ChannelId, Delivery, Instant } from '../../core/types.js';
 import type { Notifier } from '../../ports/Notifier.js';
 import type { HttpClient, HttpRequest, HttpResponse } from '../../infra/httpClient.js';
 import { fetchWithRetry } from '../../infra/retry.js';
-import { SlackApiError, SLACK_RESTRICTED_TOO_MANY } from './SlackApiError.js';
+import { SlackApiError, SLACK_INVALID_SCHEDULED_MESSAGE_ID, SLACK_RESTRICTED_TOO_MANY } from './SlackApiError.js';
 
 export interface SlackRetryOptions {
   maxAttempts: number;
   baseDelayMs: number;
   sleep: (ms: number) => void;
+}
+
+export interface ScheduledSlackMessage {
+  id: string;
+  /** Epoch seconds, exactly as Slack reports it. */
+  postAt: number;
 }
 
 export interface SlackNotifierDeps {
@@ -50,9 +56,37 @@ export class SlackNotifier implements Notifier {
     return String(body.scheduled_message_id);
   }
 
+  /**
+   * Idempotent: a message that already posted (or is inside Slack's no-delete window)
+   * reports invalid_scheduled_message_id — it's no longer scheduled either way, which
+   * is the outcome a cancel wants, so that one error counts as success.
+   */
   cancel(externalMessageId: string): void {
     const channel = this.resolveDmChannel();
-    this.call('chat.deleteScheduledMessage', { channel, scheduled_message_id: externalMessageId });
+    try {
+      this.call('chat.deleteScheduledMessage', { channel, scheduled_message_id: externalMessageId });
+    } catch (error) {
+      if (error instanceof SlackApiError && error.slackError === SLACK_INVALID_SCHEDULED_MESSAGE_ID) return;
+      throw error;
+    }
+  }
+
+  /** Every message still queued in the user's DM — backs the one-off orphan purge. */
+  listScheduled(): ScheduledSlackMessage[] {
+    const channel = this.resolveDmChannel();
+    const messages: ScheduledSlackMessage[] = [];
+    let cursor = '';
+    do {
+      const params: Record<string, string> = { channel, limit: '100' };
+      if (cursor !== '') params.cursor = cursor;
+      const body = this.call('chat.scheduledMessages.list', params);
+      const page = (body.scheduled_messages ?? []) as { id: string; post_at: number }[];
+      for (const message of page) {
+        messages.push({ id: message.id, postAt: message.post_at });
+      }
+      cursor = (body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? '';
+    } while (cursor !== '');
+    return messages;
   }
 
   sendNow(_delivery: Delivery, text: string): string | null {

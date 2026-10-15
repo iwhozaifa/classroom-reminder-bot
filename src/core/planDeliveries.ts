@@ -19,10 +19,11 @@ export interface PlanDeliveriesInput {
 
 export interface PlanDeliveriesResult {
   /**
-   * Only ever 'create' (non-scheduling channel — fully known without I/O, stays
-   * 'pending') or 'cancel'. 'markSent'/'markFailed' exist as a type for the
+   * 'create' (non-scheduling channel — fully known without I/O, stays 'pending'),
+   * 'cancel', or 'markSent' for a scheduled delivery whose fire time has already
+   * passed (the channel delivered it on its own). 'markFailed' exists for the
    * orchestrator to use *after* executing a notifierAction — this function can't
-   * know an API call's outcome, so it never emits them itself.
+   * know an API call's outcome, so it never emits that itself.
    */
   changes: DeliveryChange[];
   notifierActions: NotifierAction[];
@@ -59,8 +60,15 @@ export function planDeliveries(input: PlanDeliveriesInput): PlanDeliveriesResult
     if (desiredDeliveries.has(key)) continue; // still desired — handled above
     if (stored.status === 'sent' || stored.status === 'cancelled' || stored.status === 'failed') continue;
 
-    changes.push({ kind: 'cancel', delivery: stored });
     const caps = capabilitiesFor(channelCapabilities, stored.channel);
+    if (caps.supportsScheduling && stored.status === 'scheduled' && stored.fireAt <= now) {
+      // The channel's own infra already posted it and discarded the handle — a cancel
+      // would fail (Slack: invalid_scheduled_message_id) on every cycle forever. ADR 14.
+      changes.push({ kind: 'markSent', delivery: { ...stored, status: 'sent' } });
+      continue;
+    }
+
+    changes.push({ kind: 'cancel', delivery: stored });
     if (caps.supportsScheduling && stored.status === 'scheduled') {
       notifierActions.push({ kind: 'scheduleCancel', delivery: stored });
     }

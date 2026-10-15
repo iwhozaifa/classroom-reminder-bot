@@ -134,6 +134,45 @@ describe('SlackNotifier — cancel', () => {
     expect(client.requests[0]!.payload).toContain('scheduled_message_id=Q1298393284');
     expect(client.requests[0]!.payload).toContain('channel=D12345678');
   });
+
+  it('treats invalid_scheduled_message_id as success — the message already posted, so it is gone either way', () => {
+    const client = new FakeHttpClient();
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/slack/invalidScheduledMessageId.json')));
+    const notifier = makeNotifier(client);
+
+    expect(() => notifier.cancel('Q1298393284')).not.toThrow();
+    expect(client.requests).toHaveLength(1);
+  });
+
+  it('still throws for any other Slack error', () => {
+    const client = new FakeHttpClient();
+    client.enqueue(jsonResponse(200, { ok: false, error: 'channel_not_found' }));
+    const notifier = makeNotifier(client);
+
+    expect(() => notifier.cancel('Q1298393284')).toThrowError(SlackApiError);
+  });
+});
+
+describe('SlackNotifier — listScheduled', () => {
+  it('follows next_cursor across pages and returns every queued message in the DM', () => {
+    const client = new FakeHttpClient();
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/slack/scheduledMessagesListPage1.json')));
+    client.enqueue(jsonResponse(200, loadFixture('../fixtures/slack/scheduledMessagesListPage2.json')));
+    const notifier = makeNotifier(client);
+
+    const messages = notifier.listScheduled();
+
+    expect(messages).toEqual([
+      { id: 'Q111', postAt: 1737590400 },
+      { id: 'Q222', postAt: 1737633600 },
+      { id: 'Q333', postAt: 1737669600 },
+    ]);
+    expect(client.requests).toHaveLength(2);
+    expect(client.requests[0]!.url).toContain('chat.scheduledMessages.list');
+    expect(client.requests[0]!.payload).toContain('channel=D12345678');
+    expect(client.requests[0]!.payload).not.toContain('cursor=');
+    expect(client.requests[1]!.payload).toContain(`cursor=${encodeURIComponent('dGVhbTpDMUg5UkVTR0w=')}`);
+  });
 });
 
 describe('SlackNotifier — sendNow / heartbeat / alert', () => {

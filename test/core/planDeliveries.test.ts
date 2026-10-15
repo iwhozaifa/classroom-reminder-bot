@@ -73,6 +73,32 @@ describe('planDeliveries — scheduling channel (Slack-shaped)', () => {
     expect(result.changes).toEqual([{ kind: 'cancel', delivery: scheduled }]);
   });
 
+  it('marks an already-fired scheduled delivery as sent instead of cancelling it (Slack already posted it)', () => {
+    const fired = delivery({ status: 'scheduled', externalMessageId: 'slack-msg-1', fireAt: NOW - 60_000 });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [],
+      storedDeliveries: [fired],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([]);
+    expect(result.changes).toEqual([{ kind: 'markSent', delivery: { ...fired, status: 'sent' } }]);
+  });
+
+  it('treats a scheduled delivery firing exactly now as already sent', () => {
+    const firing = delivery({ status: 'scheduled', externalMessageId: 'slack-msg-1', fireAt: NOW });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [],
+      storedDeliveries: [firing],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([]);
+    expect(result.changes).toEqual([{ kind: 'markSent', delivery: { ...firing, status: 'sent' } }]);
+  });
+
   it.each(['sent', 'cancelled', 'failed'] as const)(
     'leaves an already-terminal (%s) delivery alone when it is no longer desired',
     (status) => {
