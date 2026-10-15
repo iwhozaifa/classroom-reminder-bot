@@ -19,8 +19,6 @@ import { FakeSpreadsheet } from '../fakes/FakeSheet.js';
 import type { FakeSheet } from '../fakes/FakeSheet.js';
 
 export const SHEET_ID = 'sheet-1';
-export const PUSH_TOKEN = 'push-token-0123456789abcdef';
-export const TOPIC = 'projects/p/topics/classroom-push';
 export const DM_CHANNEL = 'D12345678';
 
 let cachedBundle: string | null = null;
@@ -55,7 +53,7 @@ interface FakeCourse {
 export interface HttpCall {
   method: string;
   url: string;
-  /** Slack form fields or parsed Classroom JSON body. */
+  /** Slack form fields (empty for Classroom GETs). */
   params: Record<string, string>;
 }
 
@@ -82,38 +80,25 @@ export class AppsScriptWorld {
   readonly classroomFailures = new Map<string, number>();
   /** Slack method -> error code to answer it with (`{ ok: false, error }`). */
   readonly slackFailures = new Map<string, string>();
-  /** courseId -> HTTP status for registrations.create. */
-  readonly registrationFailures = new Map<string, number>();
 
   private nextSlackId = 1;
-  private nextRegistrationId = 1;
   private readonly context: vm.Context;
 
   constructor() {
     this.properties.set('SLACK_BOT_TOKEN', 'xoxb-test');
     this.properties.set('SLACK_USER_ID', 'U999');
     this.properties.set('SHEET_ID', SHEET_ID);
-    this.properties.set('PUSH_VERIFICATION_TOKEN', PUSH_TOKEN);
-    this.properties.set('PUBSUB_TOPIC', TOPIC);
 
     this.context = vm.createContext(this.globals());
     vm.runInContext(buildBundle(), this.context);
     this.run('setupSheet');
   }
 
-  /** Calls a top-level entry point exactly as a trigger, the Run button, or a web request would. */
+  /** Calls a top-level entry point exactly as a trigger or the editor's Run button would. */
   run(functionName: string, arg?: unknown): unknown {
     const fn = (this.context as Record<string, unknown>)[functionName];
     if (typeof fn !== 'function') throw new Error(`Bundle has no top-level function ${functionName}`);
     return (fn as (a?: unknown) => unknown)(arg);
-  }
-
-  /** The `e` Apps Script hands doPost for a POST to `/exec?token=...`. */
-  doPost(body: string, token: string | null = PUSH_TOKEN): unknown {
-    return this.run('doPost', {
-      parameter: token === null ? {} : { token },
-      postData: { contents: body, type: 'application/json', length: body.length },
-    });
   }
 
   addCourse(courseId: string, name: string, work: FakeCourseWork[] = []): void {
@@ -190,13 +175,7 @@ export class AppsScriptWorld {
         }),
       },
       ScriptApp: Object.assign(this.scriptApp, { getOAuthToken: () => 'oauth-test-token' }),
-      Utilities: {
-        sleep: () => {},
-        base64Decode: (data: string) => [...Buffer.from(data, 'base64')],
-        newBlob: (bytes: number[]) => ({
-          getDataAsString: () => Buffer.from(bytes).toString('utf8'),
-        }),
-      },
+      Utilities: { sleep: () => {} },
       UrlFetchApp: {
         fetch: (url: string, options: { method?: string; payload?: string }) =>
           this.respond(url, (options.method ?? 'get').toLowerCase(), options.payload ?? ''),
@@ -209,7 +188,7 @@ export class AppsScriptWorld {
     this.calls.push({ method, url, params });
     const [status, body] = url.startsWith('https://slack.com/api/')
       ? this.slack(url.slice('https://slack.com/api/'.length), params)
-      : this.classroom(url, method, params);
+      : this.classroom(url);
     return {
       getResponseCode: () => status,
       getContentText: () => JSON.stringify(body),
@@ -250,22 +229,8 @@ export class AppsScriptWorld {
     }
   }
 
-  private classroom(url: string, method: string, params: Record<string, string>): [number, unknown] {
+  private classroom(url: string): [number, unknown] {
     const path = new URL(url).pathname.replace(/^\/v1/, '');
-
-    if (path === '/registrations' && method === 'post') {
-      const courseId = params['feed.courseWorkChangesInfo.courseId'] ?? '';
-      const status = this.registrationFailures.get(courseId);
-      if (status !== undefined) return [status, { error: { status: 'PERMISSION_DENIED', message: 'denied' } }];
-      return [
-        200,
-        {
-          registrationId: `reg-${this.nextRegistrationId++}`,
-          expiryTime: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-        },
-      ];
-    }
-    if (path.startsWith('/registrations/') && method === 'delete') return [200, {}];
 
     const match = /^\/courses\/([^/]+)(\/courseWork(\/-\/studentSubmissions)?)?$/.exec(path);
     const course = match ? this.courses.get(match[1]!) : undefined;
@@ -303,44 +268,8 @@ function toRawCourseWork(courseId: string, work: FakeCourseWork): Record<string,
   return raw;
 }
 
-/** Slack sends form bodies; Classroom JSON bodies are flattened to dotted keys for easy assertions. */
+/** Slack sends form bodies; the bot only ever GETs from Classroom. */
 function parseParams(url: string, payload: string): Record<string, string> {
-  if (payload === '') return {};
-  if (url.startsWith('https://slack.com/')) {
-    return Object.fromEntries(new URLSearchParams(payload));
-  }
-  const flat: Record<string, string> = {};
-  const walk = (value: unknown, prefix: string): void => {
-    if (value !== null && typeof value === 'object') {
-      for (const [key, child] of Object.entries(value)) walk(child, prefix ? `${prefix}.${key}` : key);
-    } else {
-      flat[prefix] = String(value);
-    }
-  };
-  walk(JSON.parse(payload), '');
-  return flat;
-}
-
-/** A Pub/Sub push body exactly as the subscription POSTs it (see test/fixtures/pubsub). */
-export function pushEnvelope(
-  courseId: string,
-  options: { publishTime?: number; collection?: string; eventType?: string; messageId?: string } = {},
-): string {
-  const data = Buffer.from(
-    JSON.stringify({
-      collection: options.collection ?? 'courses.courseWork',
-      eventType: options.eventType ?? 'MODIFIED',
-      resourceId: { courseId, id: 'cw-1' },
-    }),
-  ).toString('base64');
-  return JSON.stringify({
-    message: {
-      attributes: { registrationId: 'reg-1' },
-      data,
-      messageId: options.messageId ?? '1',
-      // Default: a minute old, like a real push arriving after Classroom's own lag.
-      publishTime: new Date(options.publishTime ?? Date.now() - 60_000).toISOString(),
-    },
-    subscription: 'projects/p/subscriptions/classroom-push',
-  });
+  if (payload === '' || !url.startsWith('https://slack.com/')) return {};
+  return Object.fromEntries(new URLSearchParams(payload));
 }

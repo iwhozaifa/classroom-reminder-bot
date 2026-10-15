@@ -5,20 +5,21 @@ import {
   installAllTriggers,
   installHeartbeatTrigger,
   installSyncTrigger,
-  SYNC_INTERVAL_MINUTES,
+  SYNC_SWEEP_HOURS,
   SYNC_TRIGGER_FUNCTION,
 } from '../../src/triggers/onInstall.js';
 import { FakeScriptApp } from '../fakes/FakeScriptApp.js';
 
 describe('installSyncTrigger', () => {
-  it('creates exactly one trigger for syncReminders, on the configured interval', () => {
+  it('creates exactly one trigger for syncReminders, every SYNC_SWEEP_HOURS (4) hours', () => {
     const scriptApp = new FakeScriptApp();
 
     installSyncTrigger(scriptApp as unknown as GoogleAppsScript.Script.ScriptApp);
 
     expect(scriptApp.triggers).toHaveLength(1);
     expect(scriptApp.triggers[0]!.getHandlerFunction()).toBe(SYNC_TRIGGER_FUNCTION);
-    expect(scriptApp.triggers[0]!.everyMinutesValue).toBe(SYNC_INTERVAL_MINUTES);
+    expect(scriptApp.triggers[0]!.everyHoursValue).toBe(SYNC_SWEEP_HOURS);
+    expect(SYNC_SWEEP_HOURS).toBe(4);
   });
 
   it('is idempotent — running it twice still leaves exactly one trigger', () => {

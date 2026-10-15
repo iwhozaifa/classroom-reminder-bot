@@ -2,27 +2,19 @@ type ScriptAppType = GoogleAppsScript.Script.ScriptApp;
 
 export const SYNC_TRIGGER_FUNCTION = 'syncReminders';
 export const HEARTBEAT_TRIGGER_FUNCTION = 'heartbeat';
-export const RENEW_REGISTRATIONS_TRIGGER_FUNCTION = 'renewPushRegistrations';
-export const CATCH_UP_SYNC_FUNCTION = 'catchUpSync';
-
-/** How long after a lock-busy push the one-shot catch-up sync runs. */
-export const CATCH_UP_DELAY_MS = 60_000;
 
 /**
- * Safety-net sweep, not the primary change detector — Classroom push (pushSync.ts)
- * is (ADR 13). The sweep still has to exist: reconcile() depends on `now`, and no
- * Classroom event fires when a no-due-date assignment's rolling window simply
- * advances, or when a push was lost. 6 hours keeps every one of those within a
- * fraction of the 24h top-up horizon. Must be one of Apps Script's allowed
- * everyHours values (1, 2, 4, 6, 8, 12).
+ * Every 4 hours (ADR 15). Slack holds every scheduled reminder and posts it at the
+ * exact second on its own, so this interval never delays a reminder — it only bounds
+ * how long a Classroom change (new assignment, due-date change, turn-in) takes to be
+ * noticed. 6 runs a day instead of 144 keeps the Executions log readable. Free push
+ * isn't available (ADR 13). Must be one of Apps Script's allowed everyHours values
+ * (1, 2, 4, 6, 8, 12).
  */
-export const SYNC_SWEEP_HOURS = 6;
+export const SYNC_SWEEP_HOURS = 4;
 
 /** Hour of day (script timezone, see appsscript.json) the daily heartbeat fires. */
 export const HEARTBEAT_HOUR_OF_DAY = 8;
-
-/** Hour of day the daily push-registration renewal fires — off-peak, away from the heartbeat. */
-export const RENEW_REGISTRATIONS_HOUR_OF_DAY = 3;
 
 function reinstall(scriptApp: ScriptAppType, handlerFunction: string, create: () => void): void {
   for (const trigger of scriptApp.getProjectTriggers()) {
@@ -54,50 +46,8 @@ export function installHeartbeatTrigger(scriptApp: ScriptAppType): void {
   });
 }
 
-/** Same idempotency guarantee — daily, since Classroom registrations expire after ~7 days. */
-export function installRenewRegistrationsTrigger(scriptApp: ScriptAppType): void {
-  reinstall(scriptApp, RENEW_REGISTRATIONS_TRIGGER_FUNCTION, () => {
-    scriptApp
-      .newTrigger(RENEW_REGISTRATIONS_TRIGGER_FUNCTION)
-      .timeBased()
-      .everyDays(1)
-      .atHour(RENEW_REGISTRATIONS_HOUR_OF_DAY)
-      .create();
-  });
-}
-
 /** Convenience for a fresh install — registers every trigger in one call. */
 export function installAllTriggers(scriptApp: ScriptAppType): void {
   installSyncTrigger(scriptApp);
   installHeartbeatTrigger(scriptApp);
-  installRenewRegistrationsTrigger(scriptApp);
-}
-
-/**
- * A push that hit a busy lock can't be nacked back to Pub/Sub (Apps Script always
- * answers 200), so without this it would wait for the 6-hour sweep. Schedules one
- * one-shot full sync shortly after instead — and only one: if a catch-up is already
- * pending it covers this push too, which also keeps a burst of pushes from piling
- * up toward Apps Script's 20-triggers-per-script limit.
- */
-export function scheduleCatchUpSync(scriptApp: ScriptAppType): boolean {
-  const pending = scriptApp
-    .getProjectTriggers()
-    .some((trigger) => trigger.getHandlerFunction() === CATCH_UP_SYNC_FUNCTION);
-  if (pending) return false;
-  scriptApp.newTrigger(CATCH_UP_SYNC_FUNCTION).timeBased().after(CATCH_UP_DELAY_MS).create();
-  return true;
-}
-
-/**
- * A fired one-shot trigger stays listed (and counts toward the limit) until deleted,
- * so the catch-up handler removes its own before doing anything else — which also
- * lets it schedule a fresh one if the lock is *still* busy.
- */
-export function clearCatchUpSync(scriptApp: ScriptAppType): void {
-  for (const trigger of scriptApp.getProjectTriggers()) {
-    if (trigger.getHandlerFunction() === CATCH_UP_SYNC_FUNCTION) {
-      scriptApp.deleteTrigger(trigger);
-    }
-  }
 }
