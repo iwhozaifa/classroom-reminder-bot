@@ -7,7 +7,7 @@ import { ClassroomApiError } from './ClassroomApiError.js';
 import { mapCourseWorkToAssignment, mapSubmissionState } from './classroomMapping.js';
 import type { RawCourseWork, RawStudentSubmission } from './classroomMapping.js';
 
-export const API_BASE = 'https://classroom.googleapis.com/v1';
+const API_BASE = 'https://classroom.googleapis.com/v1';
 const PAGE_SIZE = 100;
 
 export interface ClassroomRetryOptions {
@@ -152,8 +152,7 @@ export class ClassroomApiSource implements ClassroomSource {
   }
 }
 
-/** Shared with ClassroomRegistrar so both adapters map Classroom errors identically. */
-export function parseClassroomBody<T>(response: HttpResponse): T {
+function parseClassroomBody<T>(response: HttpResponse): T {
   let body: unknown;
   try {
     body = JSON.parse(response.body);

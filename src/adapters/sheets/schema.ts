@@ -6,7 +6,6 @@ export const REMINDERS_SHEET_NAME = 'Reminders';
 export const DELIVERIES_SHEET_NAME = 'Deliveries';
 export const CONFIG_SHEET_NAME = 'Config';
 export const LOG_SHEET_NAME = 'Log';
-export const REGISTRATIONS_SHEET_NAME = 'Registrations';
 
 export const REMINDERS_HEADERS = [
   'user_id',
@@ -52,6 +51,3 @@ export const CONFIG_HEADERS = [
 ] as const;
 
 export const LOG_HEADERS = ['timestamp', 'level', 'source', 'message', 'context_json'] as const;
-
-/** Classroom push-notification registrations, one row per course — see core/registrations.ts. */
-export const REGISTRATIONS_HEADERS = ['course_id', 'registration_id', 'expires_at'] as const;

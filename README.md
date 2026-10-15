@@ -9,13 +9,6 @@ then. No server, no credit card, no always-on infrastructure.
 **Status:** feature-complete (M0–M8). A daily heartbeat and two-strikes
 failure alerting watch the bot itself, so silence from Slack means "healthy."
 
-> **`feat/push-sync` branch (experimental):** Classroom changes arrive as push
-> notifications via Cloud Pub/Sub → the web app's `doPost`, and the polling
-> trigger becomes a 6-hour safety-net sweep. Needs a GCP project, possibly a
-> billing account, and an anonymous web app. Unverified on a live school
-> account. See ADR 13 in [`docs/decisions.md`](docs/decisions.md) and SETUP
-> step 8.
-
 ## How it works, in one paragraph
 
 Every 10 minutes, Apps Script fetches your pending coursework from each
@@ -146,16 +139,13 @@ Script Properties set in step 6**, not from this sheet.
 ## 9. Turn it on
 
 Back in the Apps Script editor, run **`installAllTriggers`** once. This
-registers the three triggers the bot runs on from then on:
+registers the two triggers the bot runs on from then on:
 
-- `syncReminders` every 6 hours — the safety-net sweep (Classroom push
-  notifications, step 8, are the primary way changes are picked up)
+- `syncReminders` every 10 minutes — the actual reminder loop
 - `heartbeat` once a day — a liveness DM plus Log-row pruning
-- `renewPushRegistrations` once a day — keeps the push registrations from
-  expiring (a harmless logged error until step 8 is done)
 
 You can also run `syncReminders` manually once to see it work immediately
-instead of waiting for the next sweep.
+instead of waiting up to 10 minutes.
 
 ## Verifying it worked
 

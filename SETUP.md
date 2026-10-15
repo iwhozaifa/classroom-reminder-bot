@@ -98,56 +98,18 @@ Script Properties set in step 4**, not from this sheet.
 ## 7. Turn it on
 
 Back in the Apps Script editor, run **`installAllTriggers`** once. This
-registers the three triggers the bot runs on from then on:
+registers the two triggers the bot runs on from then on:
 
-- `syncReminders` every 6 hours — the safety-net sweep (Classroom push
-  notifications, step 8, are the primary way changes are picked up)
+- `syncReminders` every 10 minutes — the actual reminder loop
 - `heartbeat` once a day — a liveness DM plus Log-row pruning
-- `renewPushRegistrations` once a day — keeps the push registrations from
-  expiring (a harmless logged error until step 8 is done)
 
 You can also run `syncReminders` manually once to see it work immediately
-instead of waiting for the next sweep.
-
-## 8. Push notifications (experimental, `feat/push-sync` branch)
-
-Without this step the bot still works — it just only notices Classroom
-changes on the 6-hour sweep. Do the manual spike in ADR 13
-([`docs/decisions.md`](docs/decisions.md)) first if you haven't: a school
-Workspace may forbid some of what follows.
-
-1. **Use a standard Google Cloud project.** In the Apps Script editor:
-   Project Settings → Google Cloud Platform (GCP) Project → Change project,
-   and enter the project number of a GCP project you own. Enable the
-   **Google Classroom API** and **Cloud Pub/Sub API** in it. Pub/Sub may ask
-   for a billing account even though this usage stays inside the free tier.
-2. **Create the topic** (Pub/Sub → Topics → Create), e.g. `classroom-push`.
-   On the topic's Permissions, grant **Pub/Sub Publisher** to
-   `classroom-notifications@system.gserviceaccount.com`.
-3. **Deploy the web app.** `npm run deploy`, then in the editor Deploy → New
-   deployment → Web app, *Execute as: Me*, *Who has access: Anyone*. Copy
-   the `/exec` URL. (`clasp push` only updates the editor's HEAD — after
-   later code changes, Deploy → Manage deployments → edit → New version, or
-   the web app keeps running old code.)
-4. **Set two more Script Properties:**
-   - `PUSH_VERIFICATION_TOKEN` — a long random string (`openssl rand -hex 32`)
-   - `PUBSUB_TOPIC` — `projects/<project-id>/topics/classroom-push`
-5. **Create the push subscription** on the topic: delivery type *Push*,
-   endpoint `<exec URL>?token=<PUSH_VERIFICATION_TOKEN>`, acknowledgement
-   deadline 60 s, message retention 10 minutes (the minimum — missed pushes
-   are covered by the sweep, so there's no point retrying for days).
-6. Re-run **`installAllTriggers`** (it's idempotent), then run
-   **`renewPushRegistrations`** once by hand and authorize the new
-   `classroom.push-notifications` scope. The **Registrations** tab should get
-   one row per course in `Config.course_ids`.
+instead of waiting up to 10 minutes.
 
 ## Verifying it worked
 
-- **Triggers page** (clock icon in the Apps Script editor sidebar): all three
+- **Triggers page** (clock icon in the Apps Script editor sidebar): both
   triggers listed, next-run times populated.
-- **Push** (if step 8 is done): edit an assignment's due date in Classroom —
-  within seconds the Log tab shows a `push` row "Push-triggered sync
-  completed", and the Pub/Sub subscription shows no unacked backlog.
 - **Log tab**: a fresh `INFO` row from `sync` after each cycle; `ERROR` rows
   would mean something's wrong (see
   [`docs/troubleshooting.md`](docs/troubleshooting.md)).

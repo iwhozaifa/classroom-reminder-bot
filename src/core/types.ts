@@ -105,14 +105,3 @@ export interface NotifierAction {
   kind: NotifierActionKind;
   delivery: Delivery;
 }
-
-/**
- * One Classroom push-notification registration (COURSE_WORK_CHANGES for one course).
- * Classroom expires these on its own (~7 days), so `expiresAt` is what the daily
- * renewal job plans against — see registrations.ts.
- */
-export interface Registration {
-  courseId: string;
-  registrationId: string;
-  expiresAt: Instant;
-}

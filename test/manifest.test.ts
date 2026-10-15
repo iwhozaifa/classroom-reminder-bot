@@ -19,11 +19,6 @@ const REQUIRED_SCOPES: { usage: string; pattern: string; scope: string }[] = [
   { usage: 'Classroom courses.get', pattern: '?fields=id,name', scope: 'classroom.courses.readonly' },
   { usage: 'Classroom courseWork.list', pattern: '/courseWork?', scope: 'classroom.coursework.me.readonly' },
   {
-    usage: 'Classroom registrations.create/delete',
-    pattern: '/registrations',
-    scope: 'classroom.push-notifications',
-  },
-  {
     usage: 'Classroom studentSubmissions.list',
     pattern: '/studentSubmissions',
     scope: 'classroom.student-submissions.me.readonly',

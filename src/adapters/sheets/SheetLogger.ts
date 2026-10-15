@@ -3,7 +3,7 @@ import type { Clock } from '../../ports/Clock.js';
 import { readDataRows, writeDataRows } from './sheetIO.js';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
-export type LogSource = 'sync' | 'slack' | 'classroom' | 'heartbeat' | 'whatsapp' | 'push' | 'purge';
+export type LogSource = 'sync' | 'slack' | 'classroom' | 'heartbeat' | 'whatsapp' | 'purge';
 
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet;
 

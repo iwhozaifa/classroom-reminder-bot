@@ -1,9 +1,0 @@
-{
-  "registrationId": "reg-123",
-  "feed": {
-    "feedType": "COURSE_WORK_CHANGES",
-    "courseWorkChangesInfo": { "courseId": "course-1" }
-  },
-  "cloudPubsubTopic": { "topicName": "projects/my-project/topics/classroom-push" },
-  "expiryTime": "2026-01-08T00:00:00Z"
-}

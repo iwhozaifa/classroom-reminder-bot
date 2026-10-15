@@ -117,12 +117,11 @@ change (`active_channels`), not a schema migration or a core-logic change.
 
 ## One real sync cycle, end to end
 
-`src/triggers/syncReminders.ts`'s `runSyncReminders()`, run by the 6-hourly
-safety-net sweep and by every Classroom push (see "The push path" below):
+`src/triggers/syncReminders.ts`'s `runSyncReminders()`, run every 10 minutes:
 
-1. Acquire the script lock (`infra/lock.ts`, 30s timeout). Miss it → log,
-   skip, and return `false`; whatever holds the lock is itself a sync, and
-   the next sweep covers anything it missed, so there's no reason to block.
+1. Acquire the script lock (`infra/lock.ts`, 30s timeout). Miss it → log and
+   skip this cycle entirely; the next one is 10 minutes away regardless, so
+   there's no reason to block.
 2. Load every active row from the Config sheet (`SheetConfigStore`).
 3. For each one, run `runSyncCycle()`: fetch live assignments
    (`ClassroomApiSource`), `reconcile()`, apply the resulting changes to the
@@ -139,44 +138,3 @@ A separate daily trigger (`heartbeat.ts`) sends a liveness DM and prunes old
 Log rows — deliberately independent of whether `syncReminders` is succeeding,
 since "the bot is silent because nothing happened" and "the bot is silent
 because it's broken" need to be distinguishable from Slack alone.
-
-## The push path
-
-On this branch, Classroom changes reach the bot as push notifications rather
-than being found by polling (ADR 13):
-
-```
-Classroom ──registrations (COURSE_WORK_CHANGES, one per course)──▶ Pub/Sub topic
-   ──push subscription, POST <exec URL>?token=…──▶ doPost (src/main.ts)
-   ──▶ handlePushNotification (src/triggers/pushSync.ts)
-         1. token check (constant-time) ───────────── wrong → log, done
-         2. parsePushEnvelope (adapters/pubsub) ───── malformed → log, done
-         3. isCoveredBySync (core/pushCoverage) ───── a sync already read past
-                                                      this publish → log, done
-         4. runSyncReminders({ onlyCourseId }) ── the normal sync, for just the
-                                                  users following that course
-```
-
-- **Users are filtered, never courses.** A push for course C syncs every user
-  who follows C, over *all* of that user's courses — `reconcile()` treats a
-  missing assignment as gone, so a one-course read would delete that user's
-  reminders for every other course.
-- **Deduplication is by publish time, not a cooldown.** Every sync (sweep or
-  push) records, per course, when it started reading Classroom. A push
-  published before that (minus a 5s margin for Classroom's read-after-write
-  lag) is already reflected, so it's skipped. This absorbs Pub/Sub's
-  at-least-once redeliveries without ever dropping a change that landed after
-  the last sync began, which an "at most once per minute" debounce would.
-- **`doPost` returns nothing and never throws.** Apps Script then answers a
-  plain 200; any `ContentService` response is served via a 302 redirect,
-  which Pub/Sub counts as a failed delivery and retries.
-- **Registrations expire** (~7 days). `renewRegistrations.ts` runs daily:
-  `planRegistrations()` (pure, `core/registrations.ts`) diffs the courses
-  active users follow against the **Registrations** tab and says what to
-  create, keep and delete, the same full-state-recompute shape as
-  `reconcile()`.
-- **The sweep stays.** `reconcile()` depends on `now`: the no-due-date
-  rolling window advances, catch-up and retention are time-based, and no
-  Classroom event fires for any of that. Lost pushes and lapsed registrations
-  also land here. So the sweep shrinks from every 10 minutes to every 6 hours
-  rather than going away.

@@ -1,6 +1,6 @@
 // Minimal in-memory stand-in for the tiny slice of ScriptApp's trigger-management
 // API this project actually calls (getProjectTriggers/deleteTrigger/newTrigger ->
-// timeBased -> everyMinutes/everyHours/everyDays/after -> create) — same spirit as FakeSheet/FakeSpreadsheet.
+// timeBased -> everyMinutes/everyHours/everyDays -> create) — same spirit as FakeSheet/FakeSpreadsheet.
 
 export class FakeTrigger {
   constructor(
@@ -9,7 +9,6 @@ export class FakeTrigger {
     public readonly everyDaysValue: number,
     public readonly atHourValue: number | null,
     public readonly everyHoursValue: number = 0,
-    public readonly afterMsValue: number | null = null,
   ) {}
 
   getHandlerFunction(): string {
@@ -27,12 +26,6 @@ class FakeClockTriggerBuilder {
   private hours = 0;
   private days = 0;
   private hour: number | null = null;
-  private afterMs: number | null = null;
-
-  after(ms: number): FakeClockTriggerBuilder {
-    this.afterMs = ms;
-    return this;
-  }
 
   everyMinutes(n: number): FakeClockTriggerBuilder {
     this.minutes = n;
@@ -61,7 +54,6 @@ class FakeClockTriggerBuilder {
       this.days,
       this.hour,
       this.hours,
-      this.afterMs,
     );
     this.scriptApp.triggers.push(trigger);
     return trigger;
