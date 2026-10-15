@@ -73,6 +73,71 @@ describe('planDeliveries — scheduling channel (Slack-shaped)', () => {
     expect(result.changes).toEqual([{ kind: 'cancel', delivery: scheduled }]);
   });
 
+  it('re-schedules a cancelled delivery that is wanted again while still in the future (unsubmit after turn-in)', () => {
+    const cancelled = delivery({ status: 'cancelled', externalMessageId: 'slack-msg-1' });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [reminder()],
+      storedDeliveries: [cancelled],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([{ kind: 'scheduleCreate', delivery: delivery() }]);
+    expect(result.changes).toEqual([]);
+  });
+
+  it('re-creates a cancelled future delivery as pending on a non-scheduling channel', () => {
+    const cancelled = delivery({ channel: 'whatsapp', status: 'cancelled' });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [reminder()],
+      storedDeliveries: [cancelled],
+      activeChannels: ['whatsapp'],
+      channelCapabilities: nonSchedulingCaps,
+    });
+    expect(result.changes).toEqual([{ kind: 'create', delivery: delivery({ channel: 'whatsapp' }) }]);
+  });
+
+  it('never revives a cancelled delivery whose fire time has passed (catch-up superseded it on purpose)', () => {
+    const past = NOW - 3_600_000;
+    const cancelled = delivery({ status: 'cancelled', fireAt: past });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [reminder({ fireAt: past })],
+      storedDeliveries: [cancelled],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([]);
+    expect(result.changes).toEqual([]);
+  });
+
+  it('marks an already-fired scheduled delivery as sent instead of cancelling it (Slack already posted it)', () => {
+    const fired = delivery({ status: 'scheduled', externalMessageId: 'slack-msg-1', fireAt: NOW - 60_000 });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [],
+      storedDeliveries: [fired],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([]);
+    expect(result.changes).toEqual([{ kind: 'markSent', delivery: { ...fired, status: 'sent' } }]);
+  });
+
+  it('treats a scheduled delivery firing exactly now as already sent', () => {
+    const firing = delivery({ status: 'scheduled', externalMessageId: 'slack-msg-1', fireAt: NOW });
+    const result = planDeliveries({
+      now: NOW,
+      desiredReminders: [],
+      storedDeliveries: [firing],
+      activeChannels: ['slack'],
+      channelCapabilities: schedulingCaps,
+    });
+    expect(result.notifierActions).toEqual([]);
+    expect(result.changes).toEqual([{ kind: 'markSent', delivery: { ...firing, status: 'sent' } }]);
+  });
+
   it.each(['sent', 'cancelled', 'failed'] as const)(
     'leaves an already-terminal (%s) delivery alone when it is no longer desired',
     (status) => {

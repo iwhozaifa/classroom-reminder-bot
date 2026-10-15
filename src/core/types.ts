@@ -28,6 +28,10 @@ export interface Assignment {
   dueDate: DueDateParts | null;
   /** Only meaningful when dueDate is non-null; null means "date but no specific time". */
   dueTime: DueTimeParts | null;
+  /** Display-only — the Classroom class name. Core logic never reads it; the reminder text does. */
+  courseName?: string;
+  /** Display-only — Classroom's alternateLink straight to this assignment. */
+  link?: string;
 }
 
 /** What reconcile() needs about the user — course allow-list and channel config live outside core. */

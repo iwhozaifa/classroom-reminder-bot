@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "scheduled_messages": [
+    { "id": "Q333", "channel_id": "D12345678", "post_at": 1737669600, "date_created": 1737500000, "text": "Reminder: a2 (2h)" }
+  ],
+  "response_metadata": { "next_cursor": "" }
+}

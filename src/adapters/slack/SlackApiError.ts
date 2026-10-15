@@ -19,3 +19,6 @@ export class SlackApiError extends Error {
 export const SLACK_TIME_TOO_FAR = 'time_too_far';
 export const SLACK_TIME_IN_PAST = 'time_in_past';
 export const SLACK_RESTRICTED_TOO_MANY = 'restricted_too_many';
+// deleteScheduledMessage's answer for a message that already posted (or is about to,
+// inside Slack's own no-delete window) — the handle is gone either way.
+export const SLACK_INVALID_SCHEDULED_MESSAGE_ID = 'invalid_scheduled_message_id';

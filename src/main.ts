@@ -8,7 +8,12 @@ import { ClassroomApiSource } from './adapters/classroom/ClassroomApiSource.js';
 import { SheetConfigStore } from './adapters/sheets/SheetConfigStore.js';
 import { SheetLogger } from './adapters/sheets/SheetLogger.js';
 import { SheetReminderStore } from './adapters/sheets/SheetReminderStore.js';
-import { CONFIG_SHEET_NAME, DELIVERIES_SHEET_NAME, LOG_SHEET_NAME, REMINDERS_SHEET_NAME } from './adapters/sheets/schema.js';
+import {
+  CONFIG_SHEET_NAME,
+  DELIVERIES_SHEET_NAME,
+  LOG_SHEET_NAME,
+  REMINDERS_SHEET_NAME,
+} from './adapters/sheets/schema.js';
 import { SlackNotifier } from './adapters/slack/SlackNotifier.js';
 import type { ChannelId } from './core/types.js';
 import { loadScriptSecrets, saveSlackDmChannelId } from './infra/config.js';
@@ -18,7 +23,9 @@ import { UrlFetchAppHttpClient } from './infra/UrlFetchAppHttpClient.js';
 import type { Notifier } from './ports/Notifier.js';
 import { HEARTBEAT_TRIGGER_FUNCTION, installAllTriggers, SYNC_TRIGGER_FUNCTION } from './triggers/onInstall.js';
 import { runHeartbeat } from './triggers/heartbeat.js';
+import { runPurgeOrphanScheduled } from './triggers/purgeOrphanScheduled.js';
 import { runSyncReminders } from './triggers/syncReminders.js';
+import type { SyncRemindersDeps } from './triggers/syncReminders.js';
 
 export const BOOTSTRAP_VERSION = '0.1.0';
 
@@ -73,13 +80,12 @@ function runListMyCourses(): void {
 }
 
 /**
- * `syncReminders` — the function the 10-minute trigger (registered by
- * `installSyncTrigger`) actually calls. Builds every real adapter, runs one cycle
- * via `runSyncReminders`, then persists a freshly-resolved Slack DM channel id back
- * to Script Properties so it isn't re-resolved every cycle (SlackNotifier only
- * knows how to report it back, not where to put it — that's this wiring's job).
+ * Builds every real adapter a sync needs — shared by the sweep and the orphan purge.
+ * `finish()` persists a freshly-resolved Slack DM channel id back to Script
+ * Properties so it isn't re-resolved every run (SlackNotifier only knows how to
+ * report it back, not where to put it — that's this wiring's job).
  */
-function runSync(): void {
+function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void; slackNotifier: SlackNotifier } {
   const secrets = loadScriptSecrets();
   const spreadsheet = SpreadsheetApp.openById(secrets.sheetId);
   const clock = new SystemClock();
@@ -107,7 +113,7 @@ function runSync(): void {
     retry: retryOptions(),
   });
 
-  runSyncReminders({
+  const deps: SyncRemindersDeps = {
     lock: new ScriptServiceLock(),
     clock,
     logger,
@@ -117,12 +123,22 @@ function runSync(): void {
     deliveryStore: reminderAndDeliveryStore,
     notifiers,
     alerter: slackNotifier,
-  });
+  };
 
-  const resolvedDmChannelId = slackNotifier.getDmChannelId();
-  if (resolvedDmChannelId && resolvedDmChannelId !== secrets.slackDmChannelId) {
-    saveSlackDmChannelId(resolvedDmChannelId);
-  }
+  const finish = (): void => {
+    const resolvedDmChannelId = slackNotifier.getDmChannelId();
+    if (resolvedDmChannelId && resolvedDmChannelId !== secrets.slackDmChannelId) {
+      saveSlackDmChannelId(resolvedDmChannelId);
+    }
+  };
+  return { deps, finish, slackNotifier };
+}
+
+/** `syncReminders` — the 4-hour sweep trigger (registered by `installAllTriggers`), also safe to run by hand. */
+function runSync(): void {
+  const { deps, finish } = buildSyncDeps();
+  runSyncReminders(deps);
+  finish();
 }
 
 /**
@@ -147,6 +163,24 @@ function runDailyHeartbeat(): void {
   runHeartbeat({ clock, logger, sender });
 }
 
+/**
+ * `purgeOrphanScheduledMessages` — one-off, run by hand from the editor: deletes
+ * duplicate reminders still queued in Slack that no Deliveries row owns (see
+ * triggers/purgeOrphanScheduled.ts). The count lands in the Executions log.
+ */
+function runPurgeOrphanScheduledMessages(): void {
+  const { deps, finish, slackNotifier } = buildSyncDeps();
+  const deleted = runPurgeOrphanScheduled({
+    lock: deps.lock,
+    logger: deps.logger,
+    configStore: deps.configStore,
+    deliveryStore: deps.deliveryStore,
+    queue: slackNotifier,
+  });
+  Logger.log(deleted === null ? 'A sync is running — try again in a minute.' : `Deleted ${deleted} orphaned scheduled message(s).`);
+  finish();
+}
+
 /** `clasp run installAllTriggers` — one-shot, idempotent, see triggers/onInstall.ts. */
 function runInstallAllTriggers(): void {
   installAllTriggers(ScriptApp);
@@ -164,4 +198,5 @@ export const entryPoints = {
   [SYNC_TRIGGER_FUNCTION]: runSync,
   [HEARTBEAT_TRIGGER_FUNCTION]: runDailyHeartbeat,
   installAllTriggers: runInstallAllTriggers,
+  purgeOrphanScheduledMessages: runPurgeOrphanScheduledMessages,
 } as const;

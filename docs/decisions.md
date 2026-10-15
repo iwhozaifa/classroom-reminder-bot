@@ -44,6 +44,8 @@ needs anything Jest has that Vitest doesn't.
 
 ## 4. 10-minute sync interval
 
+> **Superseded by ADR 15** (4-hour sweep). Kept for the reasoning.
+
 **Decision:** The `syncReminders` trigger runs every 10 minutes
 (`src/triggers/onInstall.ts`'s `SYNC_INTERVAL_MINUTES`).
 
@@ -176,3 +178,126 @@ steps 2–3), they are the ones running M0's real go/no-go check. If a Workspace
 admin blocks something, the fix is almost always an admin-side allowance, not
 a code change — but if it turns out to need one, that's the one open question
 this build couldn't close in advance.
+
+## 13. Push-primary sync via Classroom registrations + Pub/Sub (shelved)
+
+**Status:** Shelved 2026-10-15: not possible at $0 for this account (see
+"Live result" below). The code is preserved, untouched, on the
+`feat/push-sync` branch. The whole-bundle tests it gained live on
+`test/push-sync-e2e`.
+
+**Context:** The 10-minute poll (ADR 4) makes 144 runs a day, each re-reading
+every followed course from Classroom even when nothing changed. That is $0
+and well inside quota, so this is an efficiency and latency experiment, not
+a fix for a real failure.
+
+**Decision:** Classroom changes arrive as push notifications. A
+`COURSE_WORK_CHANGES` registration per followed course publishes to a Cloud
+Pub/Sub topic, and a push subscription POSTs to the Apps Script web app's
+`doPost`, which runs the normal sync for the users following that course.
+Registrations are renewed daily. The time-driven sync stays as a 6-hour
+safety-net sweep, because `reconcile()` depends on `now` (rolling window,
+catch-up, retention) and no event fires when only time passes.
+
+**Why this shape:**
+- Classroom's only push mechanism is Pub/Sub. There's no direct HTTP webhook.
+- A Pub/Sub *pull* subscription read from a time trigger would just be
+  polling again, only cheaper per tick. Push to `doPost` is the only option
+  that needs no time trigger at all for the common case.
+- Deduplication is by publish time against the last sync start
+  (`core/pushCoverage.ts`), not a cooldown, so bursts and redeliveries
+  collapse without dropping a later change.
+
+**Costs and risks (why it isn't on `main`):**
+- **Breaks the "no card" stance.** Needs a standard GCP project, and Pub/Sub
+  may require a billing account even though usage stays in the free tier.
+- **Anonymous web app.** Pub/Sub can't sign in, so the web app must allow
+  *Anyone*. A school Workspace admin may forbid that outright. The only auth
+  is a shared secret in the endpoint URL's query string (which shows up in
+  Pub/Sub's config and possibly in logs). Pub/Sub's OIDC-signed push isn't
+  usable because Apps Script never exposes the `Authorization` header to
+  `doPost`.
+- **Student eligibility unverified.** Whether a student account (not a
+  teacher) may create `COURSE_WORK_CHANGES` registrations in a given school
+  domain has not been checked live.
+- **No way to nack.** Apps Script can't return a non-2xx, so a push that hits
+  a busy lock or a crash is lost. The sweep recovers it, within 6 hours
+  instead of 10 minutes.
+- **More moving parts.** A web app deployment that must be re-versioned after
+  each `clasp push`, a daily renewal job, and a new tab and scope.
+
+**Required before any merge:** a live spike (the same idea as ADR 12) on
+the real school account. Create the topic and subscription, deploy the web app
+as Anyone, register one course as the student, then edit an assignment and
+turn one in. Confirm (a) registration is permitted, (b) the POST arrives, and
+(c) Pub/Sub sees it acknowledged (no retry storm from a 302). If any of these
+fails, record the exact error here. That is a valid outcome for this
+experiment.
+
+**Live result (2026-10-15):** stopped at the first step. A new Cloud project
+created by the school account (Owner role) refused to create the Pub/Sub topic
+(`404 Permission denied on resource or it may not exist`). The project had
+`billingEnabled: false` and the account can see no billing account. Pub/Sub
+needs billing, which needs a card, so push is out for a $0 bot. Registration
+and the 200-vs-302 question were never reached. Polling moved to every 4
+hours instead (ADR 15).
+
+## 14. An already-fired scheduled message is "sent"; cancels are idempotent; deliveries always persist
+
+**Context:** in production the sync failed every 10 minutes with
+`chat.deleteScheduledMessage failed: invalid_scheduled_message_id`, and
+reminders arrived in duplicate. Slack drops a scheduled message's id once it
+posts. `planDeliveries` still asked to cancel any no-longer-wanted `scheduled`
+row, even one whose `fireAt` had passed. `runSyncCycle` let that throw escape
+before `deliveryStore.applyChanges`, so the cycle saved nothing. That meant
+the bad cancel repeated forever, and every run re-scheduled (and never
+recorded) its new reminders.
+
+**Decision**, one fix per layer, each enough to break the loop on its own:
+- **Core:** a `scheduled` delivery whose `fireAt <= now` is treated as
+  delivered. `planDeliveries` emits `markSent` for it and no `scheduleCancel`.
+  "Scheduled with a channel that schedules natively, and the time has passed"
+  is the definition of sent.
+- **Adapter:** `SlackNotifier.cancel` treats `invalid_scheduled_message_id`
+  as success. The wanted outcome is "not queued any more", and that also covers
+  Slack's short no-delete window just before `post_at`.
+- **Orchestrator:** `runSyncCycle` persists in a `finally`, so any message
+  Slack accepted is always recorded. A cancel that genuinely fails is left
+  `scheduled` for the next cycle to retry, and its error is rethrown after
+  persisting, so the watchdog still reports real failures.
+
+A one-off `purgeOrphanScheduledMessages` entry point cleans up the duplicates
+the old loop left queued in Slack. It holds the script lock so it can't race a
+sync that is between scheduling and recording.
+
+**Follow-up found by the whole-bundle tests (`test/e2e/`): unsubmit never
+re-scheduled reminders.** Turn-in cancels the Deliveries rows. Unsubmitting
+makes the same (assignment, offset, fireAt) desired again, but
+`planDeliveries` treated any existing row as "already handled". A cancelled
+delivery whose `fireAt` is still ahead is now planned again (the store upserts
+by key). A past cancelled one stays cancelled, because catch-up cancels
+superseded past reminders on purpose.
+
+## 15. 4-hour sync sweep
+
+**Context:** the 10-minute poll (ADR 4) made 144 executions a day, which
+buried anything worth reading in the Executions log. Free push isn't
+available (ADR 13).
+
+**Decision:** `syncReminders` runs every 4 hours (`SYNC_SWEEP_HOURS` in
+`src/triggers/onInstall.ts`): 6 runs a day plus the daily heartbeat.
+
+**Why it's safe:** the poll interval never delays a reminder. Slack holds each
+scheduled message and posts it at the exact second (ADR 2). The interval only
+bounds how long a Classroom change takes to be *noticed*:
+- **New assignment or due-date change:** reminders appear within 4 hours. One
+  posted with less than 4 hours left gets its most urgent reminder sent
+  immediately when the sweep sees it (catch-up, rule 7).
+- **Turned in:** reminders already queued in Slack can still arrive for up to
+  4 hours. Run `syncReminders` from the editor after turning work in to cancel
+  them straight away.
+- **No-due-date assignments:** the 7-day rolling window is topped up 6 times a
+  day, far more than it needs.
+
+**Cost:** slower reaction to changes, accepted for a readable Executions log.
+Running the sweep by hand is the escape hatch.

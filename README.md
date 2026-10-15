@@ -1,7 +1,7 @@
 # Classroom Reminder Bot
 
 A $0 Google Classroom deadline reminder bot. Google Apps Script polls Classroom
-on a 10-minute time-driven trigger, tracks pending assignments in a Google
+on a 4-hour time-driven trigger, tracks pending assignments in a Google
 Sheet, and sends Slack DM reminders timed via `chat.scheduleMessage` so they
 arrive at the exact moment — even if Apps Script itself isn't running right
 then. No server, no credit card, no always-on infrastructure.
@@ -11,7 +11,7 @@ failure alerting watch the bot itself, so silence from Slack means "healthy."
 
 ## How it works, in one paragraph
 
-Every 10 minutes, Apps Script fetches your pending coursework from each
+Every 4 hours, Apps Script fetches your pending coursework from each
 allow-listed Classroom course, diffs it against what's already tracked in a
 Google Sheet, and schedules (or cancels) Slack DMs for the offsets that
 changed — 24h/12h/2h/1h before a due date, or a recurring reminder if an
@@ -141,11 +141,12 @@ Script Properties set in step 6**, not from this sheet.
 Back in the Apps Script editor, run **`installAllTriggers`** once. This
 registers the two triggers the bot runs on from then on:
 
-- `syncReminders` every 10 minutes — the actual reminder loop
+- `syncReminders` every 4 hours — the actual reminder loop
 - `heartbeat` once a day — a liveness DM plus Log-row pruning
 
 You can also run `syncReminders` manually once to see it work immediately
-instead of waiting up to 10 minutes.
+instead of waiting up to 4 hours. Do the same right after turning work in if
+you want its remaining reminders cancelled straight away (ADR 15).
 
 ## Verifying it worked
 

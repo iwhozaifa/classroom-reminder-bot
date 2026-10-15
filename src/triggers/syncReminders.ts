@@ -1,6 +1,16 @@
+import { cleanSubjectName, formatReminderText } from '../core/formatReminder.js';
 import { planDeliveries } from '../core/planDeliveries.js';
 import { reconcile } from '../core/reconcile.js';
-import type { ChannelCapabilities, ChannelId, Delivery, DeliveryChange, UserConfig } from '../core/types.js';
+import type {
+  Assignment,
+  ChannelCapabilities,
+  ChannelId,
+  Delivery,
+  DeliveryChange,
+  Instant,
+  Reminder,
+  UserConfig,
+} from '../core/types.js';
 import type { Clock } from '../ports/Clock.js';
 import type { ClassroomSource } from '../ports/ClassroomSource.js';
 import type { DeliveryStore } from '../ports/DeliveryStore.js';
@@ -66,21 +76,38 @@ export function runSyncCycle(deps: SyncCycleDeps): void {
     channelCapabilities,
   });
 
-  const executedChanges: DeliveryChange[] = [...planResult.changes];
-  for (const action of planResult.notifierActions) {
-    const notifier = notifiers[action.delivery.channel]!;
-    const text = describe(action.delivery);
+  const describe = describer(config.timezone, reconcileResult.desiredReminders, liveAssignments);
+  const failedCancels = new Set<Delivery>();
+  let firstCancelError: unknown = null;
+  const executedChanges: DeliveryChange[] = [];
+  try {
+    for (const action of planResult.notifierActions) {
+      const notifier = notifiers[action.delivery.channel]!;
 
-    if (action.kind === 'scheduleCreate') {
-      executedChanges.push(runSchedule(notifier, action.delivery, text));
-    } else if (action.kind === 'scheduleCancel') {
-      notifier.cancel(action.delivery.externalMessageId!);
-    } else {
-      executedChanges.push(runSendNow(notifier, action.delivery, text));
+      if (action.kind === 'scheduleCreate') {
+        executedChanges.push(runSchedule(notifier, action.delivery, describe(action.delivery, action.delivery.fireAt)));
+      } else if (action.kind === 'scheduleCancel') {
+        try {
+          notifier.cancel(action.delivery.externalMessageId!);
+        } catch (error) {
+          // Leave the row 'scheduled' so the next cycle retries this one cancel.
+          failedCancels.add(action.delivery);
+          firstCancelError ??= error;
+        }
+      } else {
+        executedChanges.push(runSendNow(notifier, action.delivery, describe(action.delivery, now)));
+      }
     }
+  } finally {
+    // Always persist, even if something above threw: a message Slack already accepted
+    // but we never recorded gets re-scheduled next cycle — a duplicate. ADR 14.
+    deliveryStore.applyChanges([
+      ...planResult.changes.filter((change) => !failedCancels.has(change.delivery)),
+      ...executedChanges,
+    ]);
   }
 
-  deliveryStore.applyChanges(executedChanges);
+  if (firstCancelError !== null) throw firstCancelError;
 }
 
 function runSchedule(notifier: Notifier, delivery: Delivery, text: string): DeliveryChange {
@@ -101,8 +128,31 @@ function runSendNow(notifier: Notifier, delivery: Delivery, text: string): Deliv
   }
 }
 
-function describe(delivery: Delivery): string {
-  return `Reminder: ${delivery.assignmentId} (${delivery.reminderType})`;
+/**
+ * Every create/sendNow delivery comes from a desired reminder, so both lookups hit;
+ * the id-only fallback just keeps a mismatch from ever costing the reminder itself.
+ */
+function describer(
+  timezone: string,
+  desiredReminders: Reminder[],
+  liveAssignments: Assignment[],
+): (delivery: Delivery, deliveredAt: Instant) => string {
+  const reminderByAssignment = new Map(desiredReminders.map((r) => [r.assignmentId, r]));
+  const assignmentById = new Map(liveAssignments.map((a) => [a.assignmentId, a]));
+
+  return (delivery, deliveredAt) => {
+    const reminder = reminderByAssignment.get(delivery.assignmentId);
+    if (reminder === undefined) return `Reminder: ${delivery.assignmentId} (${delivery.reminderType})`;
+    const assignment = assignmentById.get(delivery.assignmentId);
+    return formatReminderText({
+      subject: assignment?.courseName === undefined ? null : cleanSubjectName(assignment.courseName),
+      title: reminder.title,
+      dueAt: reminder.dueAt,
+      deliveredAt,
+      timezone,
+      link: assignment?.link ?? null,
+    });
+  };
 }
 
 export interface SyncRemindersDeps {
@@ -119,9 +169,9 @@ export interface SyncRemindersDeps {
 }
 
 /**
- * The real orchestrator, run every 10 minutes by the trigger `onInstall.ts`
- * registers. Acquires the script lock first (skip-and-log on contention, per the
- * plan — never block, since the next cycle is 10 minutes away regardless);
+ * The real orchestrator, run every 4 hours by the trigger `onInstall.ts` registers
+ * (and by hand from the editor). Acquires the script lock first (skip-and-log on
+ * contention — never block, the next sweep will pick the work up);
  * everything else happens only while held, released in `finally` so a crash never
  * leaves the lock stuck until Apps Script's own timeout.
  *

@@ -6,7 +6,8 @@
       "state": "PUBLISHED",
       "creationTime": "2026-01-05T09:00:00.000Z",
       "dueDate": { "year": 2026, "month": 1, "day": 12 },
-      "dueTime": { "hours": 23, "minutes": 59 }
+      "dueTime": { "hours": 23, "minutes": 59 },
+      "alternateLink": "https://classroom.google.com/c/course-1/a/cw-1/details"
     },
     {
       "id": "cw-2",

@@ -13,6 +13,7 @@ const EXPECTED_ENTRY_POINTS = [
   'setupSheet',
   'listMyCourses',
   'installAllTriggers',
+  'purgeOrphanScheduledMessages',
   SYNC_TRIGGER_FUNCTION,
   HEARTBEAT_TRIGGER_FUNCTION,
 ];

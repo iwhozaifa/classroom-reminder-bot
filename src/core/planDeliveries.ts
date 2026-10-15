@@ -19,10 +19,11 @@ export interface PlanDeliveriesInput {
 
 export interface PlanDeliveriesResult {
   /**
-   * Only ever 'create' (non-scheduling channel — fully known without I/O, stays
-   * 'pending') or 'cancel'. 'markSent'/'markFailed' exist as a type for the
+   * 'create' (non-scheduling channel — fully known without I/O, stays 'pending'),
+   * 'cancel', or 'markSent' for a scheduled delivery whose fire time has already
+   * passed (the channel delivered it on its own). 'markFailed' exists for the
    * orchestrator to use *after* executing a notifierAction — this function can't
-   * know an API call's outcome, so it never emits them itself.
+   * know an API call's outcome, so it never emits that itself.
    */
   changes: DeliveryChange[];
   notifierActions: NotifierAction[];
@@ -45,7 +46,11 @@ export function planDeliveries(input: PlanDeliveriesInput): PlanDeliveriesResult
   const storedByKey = new Map(storedDeliveries.map((d) => [deliveryKey(d), d]));
 
   for (const [key, desired] of desiredDeliveries) {
-    if (storedByKey.has(key)) continue; // same key = same fireAt = no-op
+    const stored = storedByKey.get(key);
+    // Same key = same fireAt = no-op — unless it was cancelled and is wanted again
+    // with its time still ahead (turned in, then unsubmitted). A past cancelled one
+    // stays cancelled: catch-up cancels superseded past reminders on purpose.
+    if (stored !== undefined && !(stored.status === 'cancelled' && stored.fireAt > now)) continue;
 
     const caps = capabilitiesFor(channelCapabilities, desired.channel);
     if (caps.supportsScheduling) {
@@ -59,8 +64,15 @@ export function planDeliveries(input: PlanDeliveriesInput): PlanDeliveriesResult
     if (desiredDeliveries.has(key)) continue; // still desired — handled above
     if (stored.status === 'sent' || stored.status === 'cancelled' || stored.status === 'failed') continue;
 
-    changes.push({ kind: 'cancel', delivery: stored });
     const caps = capabilitiesFor(channelCapabilities, stored.channel);
+    if (caps.supportsScheduling && stored.status === 'scheduled' && stored.fireAt <= now) {
+      // The channel's own infra already posted it and discarded the handle — a cancel
+      // would fail (Slack: invalid_scheduled_message_id) on every cycle forever. ADR 14.
+      changes.push({ kind: 'markSent', delivery: { ...stored, status: 'sent' } });
+      continue;
+    }
+
+    changes.push({ kind: 'cancel', delivery: stored });
     if (caps.supportsScheduling && stored.status === 'scheduled') {
       notifierActions.push({ kind: 'scheduleCancel', delivery: stored });
     }

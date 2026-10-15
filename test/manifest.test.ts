@@ -16,6 +16,7 @@ const REQUIRED_SCOPES: { usage: string; pattern: string; scope: string }[] = [
   { usage: 'UrlFetchApp (Slack + Classroom REST)', pattern: 'UrlFetchApp.fetch(', scope: 'script.external_request' },
   { usage: 'SpreadsheetApp', pattern: 'SpreadsheetApp.', scope: 'spreadsheets' },
   { usage: 'Classroom courses.list', pattern: '/courses?', scope: 'classroom.courses.readonly' },
+  { usage: 'Classroom courses.get', pattern: '?fields=id,name', scope: 'classroom.courses.readonly' },
   { usage: 'Classroom courseWork.list', pattern: '/courseWork?', scope: 'classroom.coursework.me.readonly' },
   {
     usage: 'Classroom studentSubmissions.list',
