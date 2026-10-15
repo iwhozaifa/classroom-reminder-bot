@@ -44,8 +44,7 @@ needs anything Jest has that Vitest doesn't.
 
 ## 4. 10-minute sync interval
 
-> **Superseded on the `feat/push-sync` branch by ADR 13** (push-primary, with
-> a 6-hour sweep). Still current on `main`.
+> **Superseded by ADR 15** (4-hour sweep). Kept for the reasoning.
 
 **Decision:** The `syncReminders` trigger runs every 10 minutes
 (`src/triggers/onInstall.ts`'s `SYNC_INTERVAL_MINUTES`).
@@ -180,9 +179,12 @@ admin blocks something, the fix is almost always an admin-side allowance, not
 a code change — but if it turns out to need one, that's the one open question
 this build couldn't close in advance.
 
-## 13. Push-primary sync via Classroom registrations + Pub/Sub (experimental)
+## 13. Push-primary sync via Classroom registrations + Pub/Sub (shelved)
 
-**Status:** Experimental, `feat/push-sync` branch only. Not merged to `main`.
+**Status:** Shelved 2026-10-15: not possible at $0 for this account (see
+"Live result" below). The code is preserved, untouched, on the
+`feat/push-sync` branch. The whole-bundle tests it gained live on
+`test/push-sync-e2e`.
 
 **Context:** The 10-minute poll (ADR 4) makes 144 runs a day, each re-reading
 every followed course from Classroom even when nothing changed. That is $0
@@ -232,6 +234,14 @@ turn one in. Confirm (a) registration is permitted, (b) the POST arrives, and
 fails, record the exact error here. That is a valid outcome for this
 experiment.
 
+**Live result (2026-10-15):** stopped at the first step. A new Cloud project
+created by the school account (Owner role) refused to create the Pub/Sub topic
+(`404 Permission denied on resource or it may not exist`). The project had
+`billingEnabled: false` and the account can see no billing account. Pub/Sub
+needs billing, which needs a card, so push is out for a $0 bot. Registration
+and the 200-vs-302 question were never reached. Polling moved to every 4
+hours instead (ADR 15).
+
 ## 14. An already-fired scheduled message is "sent"; cancels are idempotent; deliveries always persist
 
 **Context:** in production the sync failed every 10 minutes with
@@ -260,15 +270,34 @@ A one-off `purgeOrphanScheduledMessages` entry point cleans up the duplicates
 the old loop left queued in Slack. It holds the script lock so it can't race a
 sync that is between scheduling and recording.
 
-**Follow-ups found by the whole-bundle push tests (`test/e2e/`):**
-- **Unsubmit never re-scheduled reminders.** Turn-in cancels the Deliveries
-  rows. Unsubmitting makes the same (assignment, offset, fireAt) desired
-  again, but `planDeliveries` treated any existing row as "already handled".
-  A cancelled delivery whose `fireAt` is still ahead is now planned again (the
-  store upserts by key). A past cancelled one stays cancelled, because
-  catch-up cancels superseded past reminders on purpose.
-- **A failed sync marked its push as covered.** `recordSyncStart` ran before
-  the cycle, so a Pub/Sub redelivery of a push whose sync had just failed was
-  skipped. The mark is now written only after the user's cycle succeeds.
-- **A lock-busy push waited up to 6 hours.** `doPost` now schedules a single
-  one-shot `catchUpSync` trigger about 60 seconds later (see troubleshooting).
+**Follow-up found by the whole-bundle tests (`test/e2e/`): unsubmit never
+re-scheduled reminders.** Turn-in cancels the Deliveries rows. Unsubmitting
+makes the same (assignment, offset, fireAt) desired again, but
+`planDeliveries` treated any existing row as "already handled". A cancelled
+delivery whose `fireAt` is still ahead is now planned again (the store upserts
+by key). A past cancelled one stays cancelled, because catch-up cancels
+superseded past reminders on purpose.
+
+## 15. 4-hour sync sweep
+
+**Context:** the 10-minute poll (ADR 4) made 144 executions a day, which
+buried anything worth reading in the Executions log. Free push isn't
+available (ADR 13).
+
+**Decision:** `syncReminders` runs every 4 hours (`SYNC_SWEEP_HOURS` in
+`src/triggers/onInstall.ts`): 6 runs a day plus the daily heartbeat.
+
+**Why it's safe:** the poll interval never delays a reminder. Slack holds each
+scheduled message and posts it at the exact second (ADR 2). The interval only
+bounds how long a Classroom change takes to be *noticed*:
+- **New assignment or due-date change:** reminders appear within 4 hours. One
+  posted with less than 4 hours left gets its most urgent reminder sent
+  immediately when the sweep sees it (catch-up, rule 7).
+- **Turned in:** reminders already queued in Slack can still arrive for up to
+  4 hours. Run `syncReminders` from the editor after turning work in to cancel
+  them straight away.
+- **No-due-date assignments:** the 7-day rolling window is topped up 6 times a
+  day, far more than it needs.
+
+**Cost:** slower reaction to changes, accepted for a readable Executions log.
+Running the sweep by hand is the escape hatch.

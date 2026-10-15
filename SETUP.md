@@ -100,11 +100,12 @@ Script Properties set in step 4**, not from this sheet.
 Back in the Apps Script editor, run **`installAllTriggers`** once. This
 registers the two triggers the bot runs on from then on:
 
-- `syncReminders` every 10 minutes — the actual reminder loop
+- `syncReminders` every 4 hours — the actual reminder loop
 - `heartbeat` once a day — a liveness DM plus Log-row pruning
 
 You can also run `syncReminders` manually once to see it work immediately
-instead of waiting up to 10 minutes.
+instead of waiting up to 4 hours. Do the same right after turning work in if
+you want its remaining reminders cancelled straight away (ADR 15).
 
 ## Verifying it worked
 

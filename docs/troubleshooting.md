@@ -137,35 +137,12 @@ needs `https://www.googleapis.com/auth/script.scriptapp`). To fix:
 3. Run any function from the editor again — Google shows a fresh consent
    prompt for the new scope; accept it.
 
-## Push notifications (`feat/push-sync` branch)
+## A reminder arrived after I already turned the work in
 
-- **Log tab shows `Rejected push with missing or wrong token`.** The push
-  subscription's endpoint URL doesn't end in
-  `?token=<PUSH_VERIFICATION_TOKEN>` exactly, or the property was changed
-  without updating the subscription. If you never set up a subscription, it's
-  someone probing the public `/exec` URL. That's harmless, but rotate the
-  token if it ever leaked.
-- **No `push` rows at all after editing an assignment.** Check in order:
-  the Registrations tab has a non-expired row for that course (else run
-  `renewPushRegistrations` and read its Log rows); the topic grants Pub/Sub
-  Publisher to `classroom-notifications@system.gserviceaccount.com`; the
-  subscription's endpoint is the *current* web app deployment's `/exec` URL;
-  the deployment's access is *Anyone*. If a Workspace admin blocks *Anyone*,
-  push can't work on that domain, and the 6-hour sweep is all you get.
-- **`renewPushRegistrations` fails with `PERMISSION_DENIED`.** The
-  `classroom.push-notifications` scope wasn't authorized (run it once by hand
-  from the editor), the Classroom API isn't enabled in the linked GCP
-  project, or the domain doesn't allow this account to register for that
-  course's feed.
-- **Pub/Sub subscription shows a growing unacked backlog / redeliveries.**
-  The endpoint is answering with something other than a 2xx, most likely a
-  302 because `doPost` returned a value. It must return nothing. Redeliveries
-  are still harmless (they're skipped as already covered), and the 10-minute
-  retention bounds them.
-- **Log shows `Push-triggered sync skipped (lock busy)`.** Another sync held
-  the lock past its 30s wait. Apps Script can't ask Pub/Sub to redeliver, so
-  `doPost` schedules a one-shot `catchUpSync` trigger about a minute later.
-  Only one is ever pending, however many pushes were skipped. It deletes itself
-  when it runs, and re-arms if the lock is still busy. If you see a
-  `catchUpSync` trigger that's hours old on the Triggers page, its run failed:
-  check Executions.
+Expected with the 4-hour sweep (ADR 15). Reminders are queued in Slack ahead
+of time, and the bot only notices the turn-in on its next sweep, up to 4 hours
+later. To cancel the rest immediately, run `syncReminders` from the Apps
+Script editor's Run dropdown right after turning work in.
+
+The same applies to a new assignment or a changed due date: they show up
+within 4 hours, or straight away after a manual `syncReminders` run.

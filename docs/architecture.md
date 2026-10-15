@@ -117,11 +117,11 @@ change (`active_channels`), not a schema migration or a core-logic change.
 
 ## One real sync cycle, end to end
 
-`src/triggers/syncReminders.ts`'s `runSyncReminders()`, run every 10 minutes:
+`src/triggers/syncReminders.ts`'s `runSyncReminders()`, run every 4 hours:
 
 1. Acquire the script lock (`infra/lock.ts`, 30s timeout). Miss it → log and
-   skip this cycle entirely; the next one is 10 minutes away regardless, so
-   there's no reason to block.
+   skip this cycle entirely; the next sweep (or a manual run) picks the work
+   up, so there's no reason to block.
 2. Load every active row from the Config sheet (`SheetConfigStore`).
 3. For each one, run `runSyncCycle()`: fetch live assignments
    (`ClassroomApiSource`), `reconcile()`, apply the resulting changes to the
