@@ -162,7 +162,10 @@ needs `https://www.googleapis.com/auth/script.scriptapp`). To fix:
   302 because `doPost` returned a value. It must return nothing. Redeliveries
   are still harmless (they're skipped as already covered), and the 10-minute
   retention bounds them.
-- **Pushed change didn't take effect, but the Log shows `skipped (lock
-  busy)`.** Another sync held the lock past its 30s wait. Apps Script can't
-  ask Pub/Sub to redeliver, so the next 6-hourly sweep picks it up. Run
-  `syncReminders` by hand if you don't want to wait.
+- **Log shows `Push-triggered sync skipped (lock busy)`.** Another sync held
+  the lock past its 30s wait. Apps Script can't ask Pub/Sub to redeliver, so
+  `doPost` schedules a one-shot `catchUpSync` trigger about a minute later.
+  Only one is ever pending, however many pushes were skipped. It deletes itself
+  when it runs, and re-arms if the lock is still busy. If you see a
+  `catchUpSync` trigger that's hours old on the Triggers page, its run failed:
+  check Executions.

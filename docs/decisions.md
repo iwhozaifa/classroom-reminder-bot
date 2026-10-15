@@ -259,3 +259,16 @@ recorded) its new reminders.
 A one-off `purgeOrphanScheduledMessages` entry point cleans up the duplicates
 the old loop left queued in Slack. It holds the script lock so it can't race a
 sync that is between scheduling and recording.
+
+**Follow-ups found by the whole-bundle push tests (`test/e2e/`):**
+- **Unsubmit never re-scheduled reminders.** Turn-in cancels the Deliveries
+  rows. Unsubmitting makes the same (assignment, offset, fireAt) desired
+  again, but `planDeliveries` treated any existing row as "already handled".
+  A cancelled delivery whose `fireAt` is still ahead is now planned again (the
+  store upserts by key). A past cancelled one stays cancelled, because
+  catch-up cancels superseded past reminders on purpose.
+- **A failed sync marked its push as covered.** `recordSyncStart` ran before
+  the cycle, so a Pub/Sub redelivery of a push whose sync had just failed was
+  skipped. The mark is now written only after the user's cycle succeeds.
+- **A lock-busy push waited up to 6 hours.** `doPost` now schedules a single
+  one-shot `catchUpSync` trigger about 60 seconds later (see troubleshooting).

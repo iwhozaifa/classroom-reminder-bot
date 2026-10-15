@@ -76,7 +76,8 @@ Go to Pub/Sub → Subscriptions → Create:
 - Topic: `classroom-push`
 - Delivery type: **Push**
 - Endpoint: `<your /exec URL>?token=<PUSH_VERIFICATION_TOKEN>`
-- Acknowledgement deadline: **60 s**
+- Acknowledgement deadline: **300 s**. A sync plus a 30 s lock wait can take
+  longer than 60 s, and every redelivery costs an extra execution.
 - Message retention: **10 minutes**
 
 ## 7. Turn it on
@@ -129,8 +130,8 @@ notifications" section with the likely causes:
 
 - **No push rows at all:** check the topic permission, then the endpoint URL
   and token, then the deployment version.
-- **"skipped (lock busy)":** another sync was running. The 6-hour sweep picks
-  the change up.
+- **"skipped (lock busy)":** another sync was running. A one-shot
+  `catchUpSync` trigger runs about a minute later and picks the change up.
 
 ## 10. Clean up / go back
 
