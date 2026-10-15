@@ -37,6 +37,7 @@ import {
 } from './triggers/onInstall.js';
 import { runHeartbeat } from './triggers/heartbeat.js';
 import { handlePushNotification, syncStartRecorder } from './triggers/pushSync.js';
+import { runPurgeOrphanScheduled } from './triggers/purgeOrphanScheduled.js';
 import { runRenewRegistrations } from './triggers/renewRegistrations.js';
 import { runSyncReminders } from './triggers/syncReminders.js';
 import type { SyncRemindersDeps } from './triggers/syncReminders.js';
@@ -99,7 +100,7 @@ function runListMyCourses(): void {
  * Properties so it isn't re-resolved every run (SlackNotifier only knows how to
  * report it back, not where to put it — that's this wiring's job).
  */
-function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void } {
+function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void; slackNotifier: SlackNotifier } {
   const secrets = loadScriptSecrets();
   const spreadsheet = SpreadsheetApp.openById(secrets.sheetId);
   const clock = new SystemClock();
@@ -145,7 +146,7 @@ function buildSyncDeps(): { deps: SyncRemindersDeps; finish: () => void } {
       saveSlackDmChannelId(resolvedDmChannelId);
     }
   };
-  return { deps, finish };
+  return { deps, finish, slackNotifier };
 }
 
 /**
@@ -239,6 +240,24 @@ function runDailyHeartbeat(): void {
   runHeartbeat({ clock, logger, sender });
 }
 
+/**
+ * `purgeOrphanScheduledMessages` — one-off, run by hand from the editor: deletes
+ * duplicate reminders still queued in Slack that no Deliveries row owns (see
+ * triggers/purgeOrphanScheduled.ts). The count lands in the Executions log.
+ */
+function runPurgeOrphanScheduledMessages(): void {
+  const { deps, finish, slackNotifier } = buildSyncDeps();
+  const deleted = runPurgeOrphanScheduled({
+    lock: deps.lock,
+    logger: deps.logger,
+    configStore: deps.configStore,
+    deliveryStore: deps.deliveryStore,
+    queue: slackNotifier,
+  });
+  Logger.log(deleted === null ? 'A sync is running — try again in a minute.' : `Deleted ${deleted} orphaned scheduled message(s).`);
+  finish();
+}
+
 /** `clasp run installAllTriggers` — one-shot, idempotent, see triggers/onInstall.ts. */
 function runInstallAllTriggers(): void {
   installAllTriggers(ScriptApp);
@@ -258,4 +277,5 @@ export const entryPoints = {
   [RENEW_REGISTRATIONS_TRIGGER_FUNCTION]: runRenewPushRegistrations,
   doPost: runDoPost,
   installAllTriggers: runInstallAllTriggers,
+  purgeOrphanScheduledMessages: runPurgeOrphanScheduledMessages,
 } as const;
