@@ -227,4 +227,16 @@ describe('runSyncReminders — push filtering', () => {
       [['c3'], Date.UTC(2026, 0, 1)],
     ]);
   });
+
+  it('never records a sync start for a user whose cycle failed, so a redelivered push still syncs', () => {
+    const deps = baseDeps([ROW_C1_C2], new ThrowingClassroomSource());
+    const starts: [string[], number][] = [];
+
+    runSyncReminders({
+      ...deps,
+      recordSyncStart: (courseIds, startedAt) => starts.push([courseIds, startedAt]),
+    });
+
+    expect(starts).toEqual([]);
+  });
 });

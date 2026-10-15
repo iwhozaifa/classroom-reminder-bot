@@ -165,6 +165,23 @@ describe('handlePushNotification', () => {
   });
 });
 
+describe('handlePushNotification — failed sync', () => {
+  it('a push whose sync failed is not "covered" for its redelivery', () => {
+    const { deps } = makeDeps();
+    const failing = {
+      ...deps,
+      source: {
+        listAssignments: (): Assignment[] => {
+          throw new Error('Classroom 500');
+        },
+      },
+    };
+
+    expect(handlePushNotification({ body: pushBody('c1'), token: TOKEN }, failing)).toBe('synced');
+    expect(handlePushNotification({ body: pushBody('c1'), token: TOKEN }, failing)).toBe('synced');
+  });
+});
+
 describe('syncStartRecorder', () => {
   it('writes one mark per course', () => {
     const marks = new MapStore();

@@ -168,7 +168,12 @@ export interface SyncRemindersDeps {
   lockTimeoutMs?: number;
   /** Push path only: sync just the users who follow this course (all of *their* courses, see below). */
   onlyCourseId?: string;
-  /** Called with a user's course ids just before that user's Classroom read — feeds core/pushCoverage.ts. */
+  /**
+   * Called once a user's cycle *succeeds*, with that user's course ids and the time
+   * just before its Classroom read — feeds core/pushCoverage.ts. Never called for a
+   * failed cycle: that would let a Pub/Sub redelivery of the push that triggered it
+   * be skipped as "covered" by a sync that never actually completed.
+   */
   recordSyncStart?: (courseIds: string[], startedAt: number) => void;
 }
 
@@ -203,7 +208,7 @@ export function runSyncReminders(deps: SyncRemindersDeps): boolean {
       );
     for (const storedConfig of configs) {
       try {
-        deps.recordSyncStart?.(storedConfig.courseIds, clock.now());
+        const startedAt = clock.now();
         runSyncCycle({
           clock,
           config: {
@@ -218,6 +223,7 @@ export function runSyncReminders(deps: SyncRemindersDeps): boolean {
           notifiers,
           activeChannels: storedConfig.activeChannels,
         });
+        deps.recordSyncStart?.(storedConfig.courseIds, startedAt);
         logger.log('INFO', 'sync', 'Sync cycle completed', { userId: storedConfig.userId });
         if (storedConfig.consecutiveFailureCount !== 0) {
           configStore.update(storedConfig.userId, { consecutiveFailureCount: 0 });
